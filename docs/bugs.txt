@@ -1,0 +1,204 @@
+# What's Next? Bug Findings - Resolution Status
+
+Last updated: 2026-07-04
+
+## Current Open Bugs
+
+None.
+
+## Resolved in the 2026-07-04 global-assistant placement pass
+
+1. Knowledge Base no longer has two competing search bars. The workspace-wide AI ask experience moved into a global `Ask AI` shell action available from every page, while the Knowledge Base page keeps only article/context search and per-article `Analyze`.
+2. Global AI source cards still navigate to the relevant module and open tasks, notes, SQL snippets, files, and knowledge articles where supported.
+
+## Resolved in the 2026-07-04 knowledge-analysis UI pass
+
+1. Knowledge Base article `Analyze` clicks no longer appear to do nothing. The AI request still updates the shared assistant draft, but the generated analysis is now also returned to the Knowledge Base view and rendered directly inside the article card that was analyzed, with visible per-card loading and error states.
+
+## Resolved in the 2026-07-04 activity-summary AI pass
+
+1. Ask Workspace Knowledge no longer treats `Summarize what I worked on this month` as a timer-only question or canned backend template. It now detects broad activity-summary intent, retrieves exact saved time entries plus tasks, ticket-backed tasks, notes, knowledge articles, SQL snippets, and files touched in the requested period, then sends the original user prompt plus a RAG retrieval brief and scored source evidence to the configured AI provider for grounded synthesis.
+2. Time Entry result cards no longer look like broken records. Timer sources now open the related task when available, otherwise they open the Time Tracker view, and cards show why a source matched the requested period.
+
+## Resolved in the 2026-07-04 time-aware AI answer pass
+
+1. Ask Workspace Knowledge no longer answers time questions from task progress fields or provider guesses. Questions such as `How much time did I work this week` now load saved `TimeEntry` records for the requested period, create grounded `Time Entry` sources, and return a deterministic time summary without calling Groq/OpenAI.
+2. Time answers now use exact `durationSec` values and include a task/session breakdown, so the AI answer matches the Time Tracker and Dashboard totals.
+
+## Resolved in the 2026-07-04 focus-timer precision pass
+
+1. Focus timers no longer lose sub-minute sessions. Time entries now persist `durationSec` in PostgreSQL, and pause/stop logic stores exact elapsed seconds instead of rounding to whole minutes.
+2. Time Tracker cards, weekly reports, task/project time reports, Analytics time-by-task rows, and task detail tracked-time summaries now display compact exact durations such as `7s`, `52s`, and `1m 10s`.
+3. Dashboard Focus Time now uses exact seconds and takes the larger of backend analytics and live loaded timer state, so a newly stopped timer does not remain `0` because of a stale analytics snapshot.
+4. Dashboard analytics now returns `focusedSeconds` while preserving legacy `focusedMinutes`, and the local PostgreSQL migration `20260704140000_add_time_entry_seconds` was applied.
+
+## Resolved in the 2026-07-04 latest-update AI answer pass
+
+1. Latest-update questions such as `What was the last update on the Another Test task` now lead with the actual latest task note instead of making the user open the hidden reasoning. The backend extracts the latest task note by timestamp, returns `latestNote`/`latestNoteAt` facts, and uses a dedicated latest-update template.
+2. Ask Workspace Knowledge now shows a direct-answer panel above result cards. For latest-update questions it highlights the latest note, record update date, and current status before the clickable source card.
+3. The generated reasoning section was restyled as a secondary `Reasoning and evidence` drawer so it reads more like supporting evidence and less like a dull text dump.
+
+## Resolved in the 2026-07-04 priority AI cards pass
+
+1. `Priority tasks` no longer returns `Needs more context` with `0 sources checked`. Priority-oriented task questions now use a dedicated work-queue intent that retrieves open tasks/ticket tasks and ranks them by overdue status, due date, priority, and current status.
+2. Ask Workspace Knowledge no longer makes long generated markdown the primary result when grounded sources exist. It now shows concise clickable cards first, with structured chips for status, priority, due state, progress, checklist, time, customer, and severity, and keeps generated reasoning behind a secondary disclosure.
+
+## Resolved in the 2026-07-04 indexed AI retrieval pass
+
+1. Exact task progress questions such as `What work has been done in the "Test task" task` no longer fall through to a broad provider-generated workspace summary. The AI retrieval flow now builds a request-time workspace search index over tasks, ticket-backed tasks, tickets, knowledge articles, notes, SQL snippets, and file metadata, gives quoted entity names strong title-match priority, detects natural phrases such as `work has been done`, and narrows task-progress answers to the exact matched task before generating the deterministic grounded answer.
+
+## Resolved in the 2026-07-04 advanced grounded-AI pass
+
+1. Task-specific progress questions no longer return broad, loosely related workspace summaries. The AI layer now detects task-progress intent, narrows retrieval to the strongest matching task entity, includes structured progress facts such as progress percent, checklist completion, tracked time, estimate, due status, notes, and last update, and answers with a deterministic grounded template when the question is structured.
+2. Open-work questions now use a deterministic grounded template for exact counts, urgency groups, and next actions instead of relying on the provider to infer them from raw source summaries.
+
+## Resolved in the 2026-07-04 grounded AI informativeness pass
+
+1. Grounded AI answers now receive an authoritative workspace facts brief for task and ticket work, including open-item counts, overdue/due-today/high-priority/in-progress/upcoming groups, ticket-backed work, and missing useful fields. This prevents answers from missing obvious signals such as an overdue task and gives the model enough structure to produce more useful next actions.
+2. The Ask Workspace Knowledge panel now clarifies that users can ask naturally while answers remain grounded in saved workspace records.
+
+## Resolved in the 2026-07-04 open-items AI retrieval pass
+
+1. Grounded AI search now treats `open item(s)` as a first-class task/ticket work query, tolerates typo input such as `open itms`, includes ticket-backed task records, and excludes completed/canceled work from open-item answers.
+
+## Resolved in the 2026-07-04 grounded AI answer-quality pass
+
+1. Grounded AI answers for task queries were too mechanical and included loosely related sources such as recent knowledge drafts or files. Task-specific time queries now keep task/ticket work sources unless another source has a real content match, the provider prompt asks for prioritized workspace guidance instead of raw summaries, internal record ids are no longer sent to the model, task/ticket labels are humanized, and source cards no longer show internal ranking scores.
+
+## Resolved in the 2026-07-04 dashboard analytics visibility pass
+
+1. Dashboard analytics were available from the backend but not visibly exposed on the Dashboard. The Dashboard now shows a Task Health section for due-this-week, overdue, pending, and in-progress counts, and the Weekly Activity chart now separates open, created, due, overdue, completed, and focus activity instead of collapsing task activity into one generic bar.
+
+## Resolved in the 2026-07-04 AI search mapping pass
+
+1. Knowledge Base AI search no longer depends on exact keywords only. It now maps natural language aliases, plural/singular variants, common typos, source-type hints, and date intent to grounded workspace records before answering.
+
+## Resolved in the 2026-07-04 analytics and grounded-AI pass
+
+1. Past-due open tasks now render with overdue styling across dashboard task rows, task detail lists, kanban cards, calendar task cards, timeline rows, and the task drawer status badge.
+2. Reopening a completed task now resets standalone progress instead of preserving `100%`; API-mapped tasks and local optimistic task state use the same progress derivation.
+3. Dashboard analytics now reports open, due-this-week, overdue, pending, in-progress, created, due, open, and completed task activity instead of only completed tasks, so graphs are not blank for work that is still open.
+4. The Analytics page now includes timeframe, status, and priority filters plus task, due, pending, in-progress, average-progress, completion, status, priority, project-progress, and time-by-task breakdowns.
+5. Knowledge Base grounded AI retrieval now understands temporal task questions such as `Tasks this week` by adding due/created/updated-this-week context to task sources.
+
+## Resolved in the 2026-07-03 bug cleanup pass
+
+1. AI provider failures now return actionable messages instead of the generic `AI provider request failed`; placeholder API keys are treated as not configured, failed-request logs include the HTTP error response body, and authenticated AI logs now show the real user id instead of `anonymous`.
+2. File uploads no longer fail before reaching R2 with `PayloadTooLargeError`; the server now configures a larger JSON body limit, validates file size with a clear message, and the sidebar shows storage-check failures instead of silently displaying `0 B`.
+3. API request log persistence no longer fails when flow traces contain `undefined`; log sanitization now converts nested `undefined` values to JSON-safe `null`, and Nest `ConfigService` internals are excluded from automatic service tracing.
+4. API logs now capture a readable end-to-end request flow without internal helper noise: request metadata, sanitized request payload, controller entry/exit or failure, public application service workflow steps, Prisma database query steps, sanitized response payload, status, duration, request ID, and error details.
+5. API console logs now use compact operational text with outcome, method, path, status, duration, request ID, handler, user/workspace context, short request/response previews, error details, and a public application flow summary.
+6. Sidebar storage no longer depends only on loaded file cards or database sums. The backend storage-usage endpoint now also scans the configured workspace storage prefix and reports the larger authoritative byte count.
+7. Storage usage no longer gets overwritten back to zero by the file-list loading path, and uploads immediately increase the sidebar usage while the backend aggregate refreshes.
+8. Task detail now reveals the overdue reason field as soon as an overdue save guard is triggered, including when a user attempts to set a previously non-overdue task to a past due date.
+
+
+## Resolved in the 2026-07-03 stabilization pass
+
+1. Dashboard weekly focus bars no longer force a minimum value; a new user with zero tracked time now shows zero focus activity.
+2. Tasks, Notes, and SQL Library now render explicit empty states instead of blank pages with only filters or mode buttons.
+3. Calendar year editing now uses a text-backed numeric input and commits on blur, so partial edits no longer jump to 1970 or 9999.
+4. Sidebar storage now reads an authoritative backend storage-usage aggregate instead of depending on the currently loaded file list.
+5. API logging now includes request IDs, controller, handler, sanitized request context, status, duration, persisted error details, trace steps, and fallback logging for guard/validation failures.
+6. New task dates now use local date formatting instead of UTC ISO slicing, preventing same-day task creation from becoming yesterday and incorrectly triggering overdue guards.
+7. The register -> first-run onboarding -> task lifecycle -> logout/login persistence path is covered by the Playwright e2e test and passes.
+
+
+## Resolved in the 2026-07-03 calendar/storage pass
+
+1. Dashboard focus-time and weekly analytics now come from real task/time-entry data instead of fixed sample progress.
+2. Empty-state messaging was added to the dashboard task card, calendar views, and files page so blank modules no longer look broken.
+3. Calendar month view now renders the real selected month length instead of a fixed 35-cell grid.
+4. Calendar navigation now supports previous/next month, Today, month selection, and direct year entry.
+5. Calendar now shows task flows from start date through due date, extends overdue/open tasks to today, and extends late completed tasks to completion/update date with different colors for ongoing, overdue, completed-on-time, and completed-late states.
+6. Past-due task edits now require an overdue reason in the task detail drawer.
+7. Browser notification permission is displayed as `Granted`, `Denied`, `Not requested`, or `Unsupported`.
+8. Sidebar scroll position is preserved in memory while navigating, without local/session storage.
+9. Sidebar storage now shows consumed workspace file bytes from backend-loaded file records.
+10. File, backup, profile, settings, and task-attachment UI now uses storage/upload wording instead of highlighting R2 implementation details.
+11. Dashboard summarize now shows a clear AI-provider configuration message instead of surfacing the raw 503 JSON response.
+
+## Resolved in the final 2026-07-02 upload pass
+
+1. Removed `blob:` URL behavior from file and task-attachment upload flows. File uploads now require a signed-in workspace and go through the server-side Cloudflare R2 upload endpoint, or fail with a clear message.
+2. Styled the Files page upload control as a polished upload panel with icon, selected-file count, filename list, clear action, and a primary `Upload to R2` button.
+
+## Resolved in the latest 2026-07-02 pass
+
+1. Knowledge Base article editing now includes an explicit Add related record section for adding task, ticket, SQL, note, and file links without manually typing reference syntax.
+2. Knowledge Base related items now render in two columns inside each relation group when space allows.
+3. Profile photo selection now shows a preview/status message, the save button stays usable, and successful saves show the R2 object URL.
+4. Settings buttons now call backend-backed profile, workspace, security, notification, and R2 backup actions.
+5. Email delivery was replaced from SMTP/nodemailer to the Resend API using `RESEND_API_KEY` and `EMAIL_FROM`.
+6. File upload now resets the file input after upload so another upload can happen without reloading.
+7. File, avatar, and backup uploads now use a server-side R2 upload endpoint, and file cards/details show the stored R2 object URL.
+
+## Resolved in the 2026-07-02 pass
+
+1. Knowledge Base related records are now clickable and open the real task/ticket, note, SQL, and file detail/edit surfaces.
+2. Knowledge Base related records now show clear counts and all records in bounded scroll areas instead of ambiguous `+2` / `+3` text.
+3. Knowledge Base articles now include an AI Analyze action that sends the article plus related tasks, tickets, SQL, notes, files, and references into the workspace AI assistant.
+4. Removed `CLOUDFLARE_R2_PUBLIC_URL`; R2 object URLs are now derived in server code from the configured account id and bucket.
+5. Added email-flow explanations in Settings and `docs/EMAIL_AND_AI.md`.
+6. Added current AI usage explanations in Settings and `docs/EMAIL_AND_AI.md`.
+
+## Resolved in the latest 2026-07-01 pass
+
+1. Task detail child-task, related-context, and tracked-time sections now stack vertically.
+2. Knowledge Base articles can now be edited from article cards.
+3. Promoting a ticket to an article now updates the existing auto-created ticket article when one already exists instead of creating a duplicate.
+4. Authenticated file uploads now require a configured Cloudflare R2 upload URL and saved files open the R2 public URL for download instead of downloading metadata JSON.
+5. Long file-card chips now use fixed dimensions so long file names do not squeeze the linked-type chip.
+6. Profile avatar uploads now upload to Cloudflare R2 on save and persist the returned public URL to the user profile.
+7. Workspace cards use backend workspace counts when available and active workspace data from backend responses.
+8. Server env defaults were updated from the old app/database/email names to What's Next? values while keeping R2 configuration placeholders visible.
+
+## Resolved in the 2026-07-01 pass
+
+1. Child task fields now stack vertically and use full width inside the task drawer.
+2. Task detail now shows total actual time spent from manual time plus linked tracked/focus entries, and tracked time includes timestamp and status.
+3. Archived projects now remain visible in an Archived Projects section and can be unarchived.
+4. Automatically generated ticket titles now use `<Workspace short name>-<Number>: <Title>` such as `DW-1146: Dummy title`.
+5. Notification outside-click dismissal now works across the full screen instead of only inside the header area.
+6. Creating a ticket now automatically creates a linked Knowledge Base draft with ticket/task references.
+7. Existing tasks and tickets can now be linked or unlinked from projects in the task detail drawer.
+8. The Tasks page now has All, Ongoing, and Completed filters across details, Kanban, Calendar, and Timeline modes.
+9. File cards and file detail always show Download; the latest R2 pass now requires a real object URL for authenticated file downloads.
+10. Long file names now break safely in file cards, detail views, and task attachment lists.
+11. Sidebar navigation no longer writes browser session storage.
+12. Uploaded avatars now save through profile update and immediately refresh the authenticated user shown in the header.
+13. Workspace now has a dedicated `/workspace` page with workspace cards, switching, create entry point, and active workspace edit/archive controls.
+
+## Previously Resolved
+
+1. Google login button was hidden when Google env was missing. The login page now shows a disabled Google sign-in affordance with configuration guidance.
+2. Dashboard quick actions stack vertically on the right side of the dashboard hero.
+3. Dashboard stat-card descriptions no longer truncate.
+4. Dashboard Kanban Snapshot explains that it is a compact status preview and points users to the full Tasks Kanban board.
+5. Task subtasks are structured child tasks with status, priority, and due date. Parent progress is derived from child completion, and completing a parent marks children done.
+6. Task detail totals worked time from manual minutes plus linked focus/time entries.
+7. Task attachments use file upload and show linked files in the task drawer.
+8. Project progress is calculated from linked task completion.
+9. Project milestones can be added, edited, and toggled from project detail.
+10. Project detail related tasks, notes, and files open their respective detail drawers/dialogs.
+11. Project detail icon sits beside the title instead of overlapping the cover image.
+12. Archive project copy clearly says the project is hidden from active lists and does not delete linked work.
+13. Tickets created from the ticket flow remain full task records.
+14. Ticket cards open details directly.
+15. Knowledge Base has relation-aware search and auto-linked context panels for tasks, tickets, SQL, notes, files, and references.
+16. Note cards open the note editor directly.
+17. SQL creation includes folder, database tags, execution notes, and SQL template/query fields.
+18. Calendar task deadline cards open the task detail drawer.
+19. Time tracker views and task detail read linked time entries consistently.
+20. Template Favorite, Fill variables, and Copy raw actions align in the same action row.
+21. Analytics includes status, priority, completion, overdue, project-progress, and time-by-task breakdowns.
+22. Sidebar storage wording clarifies it means workspace files/backups.
+
+## Verification
+
+- `client`: `npm run test` passed.
+- `client`: `npm run build` passed.
+- `client`: `npm run test:e2e` passed.
+- `server`: `npm run test` passed.
+- `server`: `npm run build` passed.
+- `server`: Prisma migrations applied locally through `npx prisma migrate deploy`.

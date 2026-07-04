@@ -1,0 +1,275 @@
+# What's Next? Implementation Status
+
+## Folder Structure
+
+- Root is organized around the active app folders `client/`, `server/`, and `docs/`, plus root project files such as `README.md` and `.gitignore`.
+- Client package files, dependencies, Dockerfile, environment example, and frontend source live under `client/`.
+- Server package files, dependencies, Dockerfile, environment example, Prisma schema, no-op seed command, and API source live under `server/`.
+- Documentation lives under `docs/`.
+- The old `infra/` folder was removed because local development currently uses the already installed PostgreSQL instance directly.
+
+## Implemented Client Features
+
+- Next.js App Router application.
+- Login, register, forgot-password, and reset-password routes.
+- Auth provider validates cookie-backed sessions with the backend on app load.
+- Login and registration forms connected to backend auth endpoints.
+- Protected workspace route redirects unauthenticated visitors to `/login`.
+- Logout button in the workspace top bar clears the server-issued session cookie and in-memory client session.
+- TypeScript strict mode.
+- Tailwind CSS theme tokens for light and dark modes.
+- Inter font integration.
+- shadcn-style reusable primitives: button, card, badge, progress.
+- Framer Motion transitions for page sections, sidebar, cards, and command palette.
+- Responsive workspace shell.
+- Collapsible desktop sidebar with icons.
+- Sidebar navigation switches between feature modules.
+- Separate Inbox navigation was removed so capture and execution live in the Tasks screen.
+- Top navigation with workspace-aware breadcrumb, command button, notification button, theme toggle, and create button.
+- Authenticated users load their workspace list from the backend `/workspaces` API.
+- Unauthenticated preview sessions and browser-only workspace paths have been removed.
+- Multiple workspaces can be switched from the top breadcrumb selector.
+- Global create button opens contextual creation flows.
+- Command palette opened by `Ctrl+K` or the Command button.
+- Global-search style command results across tasks, projects, notes, tickets, SQL, articles, calendar, and AI actions.
+- Command palette selections navigate to the relevant module.
+- Command palette results are generated from live workspace state.
+- Workspace state is an in-memory cache populated from backend API responses.
+- Dashboard hero answering what to work on now.
+- Dynamic metric cards for open tasks, focus time, tickets, and completed work.
+- Dashboard metric cards navigate to the relevant module.
+- Today's tasks panel with priority, status, due date, completion toggle, status select, and progress.
+- Dashboard task rows open the full task drawer and keep longer descriptions readable.
+- Weekly progress chart using live workspace state.
+- Dashboard widgets are stacked for clearer scanning, with a shorter weekly activity chart.
+- Dashboard Task Health section visibly shows due-this-week, overdue, pending, and in-progress backend analytics.
+- Dashboard Weekly Activity chart separates open, created, due, overdue, completed, and focus activity.
+- Dashboard Focus Time and Time Tracker reports use exact timer seconds, including sub-minute sessions, and merge live loaded timer state with backend analytics.
+- Pinned projects with progress indicators and task counts.
+- Dashboard project section includes clearer labels and context.
+- Kanban snapshot generated from task status.
+- Running timer panel with pause, resume, and stop.
+- Dashboard and Time Tracker timer starts can be linked to a task.
+- Running timers tick live and preserve elapsed time when paused or stopped.
+- Calendar agenda panel.
+- AI assistant prompt input with generated draft output, loading state, failure state, and polished sectioned response cards.
+- AI assistant calls the backend AI endpoint for generated workspace output.
+- AI prompts include workspace context across open tasks, ticket tasks, recent notes, SQL snippets, and tracked time.
+- Global `Ask AI` shell action opens a workspace-wide grounded assistant panel from every page, so Knowledge Base no longer needs a second AI search bar.
+- Recent notes panel from workspace state.
+- Recent dashboard notes are clickable and open the exact note in the Notes editor.
+- Recent dashboard files are clickable and open the exact file in a Files detail drawer.
+- Tasks module with kanban columns and status updates.
+- Authenticated task lists load from the backend for the active workspace.
+- Task creation persists to the backend for authenticated users and requires an active backend workspace.
+- Task status changes from dashboard rows, task drawer, and kanban drag/drop persist to the backend with optimistic rollback.
+- Task drawer priority, start date, due date, progress, actual time, checklist, and progress notes persist to the backend.
+- Task drawer title, description, tags, acceptance criteria, subtasks, dependencies, and attachment references are editable and persisted.
+- Backend task APIs verify workspace membership before list, create, or update operations.
+- Tasks support Backlog, Todo, In Progress, Pending, Review, and Done statuses.
+- Tasks module supports Details, Kanban, Calendar, and Timeline modes.
+- Calendar mode groups tasks by due date with an unscheduled lane.
+- Timeline mode orders tasks by schedule and visualizes duration, progress, estimate, and tracked time.
+- Tasks support None, Daily, Weekly, and Monthly recurrence rules.
+- Completing a recurring task creates the next Todo occurrence with shifted start and due dates.
+- Tickets are represented as task-backed work items with ticket number, customer, severity, investigation, resolution, and closure notes.
+- The Tickets screen now lists ticket tasks and opens the shared task detail drawer.
+- Task creation captures project, start date, due date, estimate, tags, checklist, subtasks, dependencies, and acceptance criteria.
+- Task start date and due date use browser date inputs.
+- User-facing task creation no longer asks for owner; created tasks default to the current user internally.
+- Create task dialog is height-constrained with a scrollable body.
+- Kanban board is horizontally scrollable with fixed-width columns and simplified cards showing only title, due date, and priority.
+- Kanban cards support drag-and-drop status changes.
+- Clicking a task row or kanban card opens a full task drawer.
+- Task drawer shows related project, dates, estimate, progress, checklist, subtasks, dependencies, attachments, tracked time, acceptance criteria, and task notes.
+- Task drawer editable fields are labeled for status, priority, dates, progress, and actual time.
+- Task-specific notes can be added to track progress and relevant details.
+- Past-due open tasks render with overdue styling across task lists, dashboard rows, kanban, calendar, timeline, and task details.
+- Reopened completed tasks reset standalone progress instead of staying at 100%.
+- Projects module with progress cards.
+- Projects open into detail views with project tasks, linked notes, task attachments as files, milestones, and derived activity.
+- Projects support cover image URLs and custom icon selection in the create flow, with covers/icons shown on project cards and detail views.
+- Project cover images render as real image elements and gracefully handle invalid URLs.
+- Projects can be edited, pinned/unpinned, and archived from project cards and detail views.
+- Notes module with create and pin actions.
+- Notes module includes a rich Markdown editor dialog with formatting toolbar, project linking, tags, pinning, write/preview modes, and rendered previews.
+- Notes module includes a backlinks graph derived from `[[Wiki links]]` and shared note tags, with incoming/outgoing link counts and graph navigation.
+- Notes track local version history on each save and support restoring previous snapshots from the editor.
+- Tickets module is backed by task records and opens the shared task detail workflow.
+- Knowledge Base module with problem/root-cause/resolution cards.
+- Knowledge articles can be created from the global create dialog.
+- Solved ticket tasks can be promoted into knowledge articles from the task drawer.
+- Knowledge article cards show related tasks, ticket tasks, SQL snippets, notes, files, and manual references from article references and matching workspace context.
+- Knowledge article `Analyze` actions render generated AI analysis directly inside the clicked article card with visible loading and error states.
+- Workspace-wide grounded AI search retrieves relevant tasks, ticket history, knowledge articles, notes, SQL snippets, and file metadata before answering.
+- Grounded workspace AI search understands natural language aliases, plural/singular forms, common typos, source-type intent, and date intent instead of requiring exact keywords.
+- Grounded workspace AI search maps open-item queries, including typo variants like `open itms`, to non-completed task and ticket work.
+- Grounded workspace AI answers prioritize task/ticket guidance, filter loosely related time-only sources, avoid exposing internal record ids, and hide internal retrieval scores from users.
+- Grounded workspace AI prompts include a computed facts brief for task/ticket answers with counts, urgency groups, due signals, ticket context, and missing fields so responses are more specific and useful.
+- Grounded workspace AI includes intent-aware retrieval and deterministic templates for structured task-progress and open-work questions, reducing noisy provider answers for common workspace workflows.
+- Grounded workspace AI builds a request-time search index across workspace records and gives quoted task/entity names exact-match priority, so questions like `What work has been done in the "Test task" task` answer from that task instead of loosely related records.
+- Grounded workspace AI treats priority/task questions as a ranked work queue, retrieving open task and ticket work even when the query is broad, such as `Priority tasks`.
+- Ask Workspace Knowledge renders grounded sources as concise clickable cards with structured task/ticket facts first, while the generated markdown reasoning is hidden behind a secondary disclosure.
+- Ask Workspace Knowledge shows a direct-answer panel above cards and uses latest-note facts for questions such as `What was the last update on the Another Test task`.
+- Ask Workspace Knowledge treats time questions as first-class grounded queries, retrieving saved time entries by period and answering with exact tracked duration plus task/session breakdowns.
+- Grounded AI search returns a clear insufficient-information response instead of calling the provider when no relevant workspace evidence is found.
+- SQL Library module with copy-to-clipboard actions.
+- SQL Library includes an editable SQL dialog with metadata fields and syntax-highlighted query preview.
+- SQL Library supports folder filtering and local snippet history with restore.
+- SQL Library includes execution notes on snippet cards and in the editor detail view.
+- SQL Library supports free-text search and tag filtering.
+- Calendar module with agenda cards.
+- Calendar supports day, week, month, and agenda views over workspace events.
+- Calendar supports browser notification permission, per-event reminder toggles, reminder lead time, and client-side reminder scheduling.
+- Calendar events can be edited, deleted, and linked to tasks or projects.
+- Calendar views include open task deadlines alongside events.
+- Time Tracker module with timer controls.
+- Time Tracker supports manual time entries and weekly reports from tracked/manual entries.
+- Time Tracker reports aggregate time by linked task and by linked project.
+- Time Tracker persists exact `durationSec` values in PostgreSQL and displays compact durations such as `7s`, `52s`, and `1m 10s`.
+- Templates module with copy-to-clipboard actions.
+- Templates support category filtering, favorites, variable fill-in, preview, and filled-copy output.
+- Templates load, create, and save favorite state through authenticated backend APIs.
+- Analytics module with live charts, timeframe/status/priority filters, due/overdue/pending/in-progress counts, average progress, project progress, and time-by-task breakdowns.
+- Settings utility module with backend-backed profile, workspace, security, notification, AI, and R2 backup controls.
+- Settings uploads JSON backups to Cloudflare R2 instead of saving browser-local files.
+- Mobile sidebar drawer for smaller screens.
+- Toast-style feedback for create, copy, upload, and backend action states.
+- Responsive layout for desktop and smaller screens.
+- First-run onboarding captures workspace name, icon, color, category, and default view.
+- Settings includes functional profile, workspace, password, active sessions, and logout-all-devices controls.
+- Notification bell opens active due-date and running-timer notifications.
+- Dialogs and drawers support Escape-to-close and tab focus containment.
+
+## Implemented Backend Features
+
+- NestJS application with modular feature structure.
+- Global API prefix: `/api`.
+- CORS configuration.
+- Helmet security middleware.
+- Global validation pipe with DTO whitelisting.
+- Global exception filter.
+- End-to-end API flow logging with compact console summaries, request IDs, sanitized request/response payloads, controller entry/exit, public application service workflow entry/exit/error steps, Prisma database query steps, status, duration, user/workspace identifiers, persisted `ApiRequestLog` records, JSONL file output, and admin error email alerts through Resend.
+- Rate limiting via `@nestjs/throttler`.
+- Prisma service as global database provider.
+- JWT authentication module.
+- Argon2 password hashing.
+- User registration.
+- User registration creates collision-resistant workspace slugs.
+- User login.
+- Current user endpoint.
+- Workspace listing and creation.
+- Project listing and creation.
+- Project creation DTO accepts icon and cover image URL metadata.
+- Task listing, creation, and status update.
+- Note listing and creation.
+- Ticket listing and creation.
+- Knowledge article listing and creation.
+- Knowledge article references are persisted for related workspace context.
+- Global search endpoint across tasks, projects, notes, tickets, SQL snippets, and knowledge articles.
+- Dashboard analytics endpoint with open, completed, due-this-week, overdue, pending, in-progress, created, due, open, and completed task activity.
+- Provider-backed AI suggestion endpoint with message persistence.
+- Grounded AI ask endpoint with workspace membership checks, intent-aware retrieval, source citations, provider fallback, and message persistence.
+- Ask Workspace Knowledge supports provider-backed RAG activity summaries: period-aware retrieval combines exact timer entries with tasks, ticket-backed tasks, notes, articles, SQL snippets, and file metadata touched in the requested period, then sends the original prompt, retrieval brief, and scored source evidence to the configured AI provider for grounded synthesis.
+- File metadata backend module with authenticated list/create/update/delete, configurable upload limits, storage-health reporting, and server-side Cloudflare R2 uploads with object URLs derived in code from account id and bucket.
+- New R2 uploads use a readable `workspaces/{workspaceId}/files/{yyyy}/{mm}/{dd}/{entityType}/{entityId-or-unlinked}/{uploadId}/{fileName}` layout, with backups under `workspaces/{workspaceId}/backups/{yyyy}/{mm}/{dd}/{uploadId}/{fileName}`.
+- Template backend module with authenticated list/create/update.
+- User profile, password, active sessions, and logout-all-devices endpoints.
+- Workspace update and archive endpoints.
+- Audit log writes on important task, project, workspace, and file mutations.
+- Pagination/filtering/sorting parser is shared by task, note, and SQL list APIs.
+
+## Implemented Database Model
+
+- PostgreSQL through Prisma.
+- UUID primary keys.
+- Soft-delete fields on major business entities.
+- Timestamps on major business entities.
+- Users.
+- Workspaces.
+- Workspace members and roles.
+- Projects.
+- Project milestones in the client workspace model.
+- Project icon and cover image metadata in the client workspace model.
+- Milestones.
+- Tasks.
+- Subtasks.
+- Task dependencies.
+- Notes.
+- Note backlinks.
+- Knowledge articles.
+- Tickets.
+- SQL snippets.
+- File assets.
+- Calendar events.
+- Time entries.
+- Time entries include exact second-level duration storage through `durationSec`.
+- Email or content templates.
+- Comments.
+- Notifications.
+- AI messages.
+- Audit logs.
+- Template favorite state.
+
+## Runtime And Deployment Notes
+
+- Client Dockerfile.
+- Server Dockerfile.
+- Environment examples split into `client/.env.example` and `server/.env.example`.
+- Seed command is intentionally no-op so users create their own data after sign-in.
+
+## Verified
+
+- Prisma schema validation passed.
+- Prisma client generation passed from `server/`.
+- Server production build passed from `server/`.
+- Client production build passed from `client/` after the bug-hardening pass.
+- Dashboard bug pass fixed summarize feedback/result visibility, right-aligned hero actions, metric navigation, task detail opening, weekly chart height, vertical widget stacking, project labels, task-readable rows, task-linked timer starts, and structured AI responses.
+- Dashboard recent notes now navigate to the specific note detail/editor.
+- Completed next feature pass: recent files dashboard navigation, command palette keyboard navigation/actions, project cover/edit/pin/archive workflows, SQL search/tag filtering, and calendar event edit/delete/linking.
+- Completed broad feature pass: calendar task deadlines, time by task/project reports, AI workflow actions, file metadata persistence and preview/delete/download UI, onboarding, workspace/profile/security settings, template persistence, audit hooks, modal keyboard accessibility, and initial Node test scripts.
+- File uploads now use a server-side Cloudflare R2 upload endpoint when `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`, and `CLOUDFLARE_R2_BUCKET` are configured.
+- Files UI hides raw R2 object URLs and paths from users while still supporting download through the stored backend URL.
+- File upload body and file-size limits are configurable through `REQUEST_BODY_LIMIT`, `FILE_UPLOAD_MAX_BYTES`, and `NEXT_PUBLIC_FILE_UPLOAD_MAX_BYTES`.
+- Notifications now include server-generated due-date/timer notices plus daily-summary and reminder-digest email actions through Resend configuration.
+- Personal and Gaming now have focused workspace views backed by persisted tasks and notes instead of generic placeholder surfaces.
+- Playwright E2E coverage now verifies register, create task, move kanban task, add task note, logout/login, and persisted task status.
+- `npm run test` passed from `client/`.
+- `npm run test` passed from `server/`.
+- `npm run test:e2e` passed from `client/`.
+- Command palette now uses live workspace results and supports create-task, start-timer, copy-template, and daily-summary actions.
+- Command palette queries authenticated backend search with a 300ms debounce and merges backend results with local commands.
+- Command palette backend search now includes files, templates, and calendar events, and local command results include loaded workspace files.
+- Authenticated users can create a new workspace from the app shell, and archiving the last workspace opens the create-workspace flow.
+- Time entries now carry `workspaceId`, timer list/start/manual flows require the active workspace, and dashboard analytics/notifications filter timers by workspace.
+- Notes now persist backend version history through `NoteVersion`; note updates snapshot the previous version and restore uses the persisted save flow.
+- Settings export uploads a JSON backup to Cloudflare R2 and stores it as a `Backup` file asset.
+- Scheduled notification delivery is available behind `ENABLE_SCHEDULED_NOTIFICATIONS=true`, with configurable reminder interval and daily summary hour.
+- Prisma migration `20260629130000_workspace_time_and_note_versions` was applied to local PostgreSQL and `npx prisma migrate status` reports the database is up to date.
+- Expiring JWTs are detected client-side; expired sessions are cleared and the login page explains that re-authentication is required.
+- Auth now uses an HttpOnly `whats_next_access_token` cookie on login/register, accepts cookie or bearer JWTs, includes credentials on API calls, and clears the cookie via `/auth/logout`.
+- Google login is implemented with Google Identity Services on the client and server-side ID token verification using `GOOGLE_CLIENT_ID` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
+- Password reset tokens are implemented with short-lived JWT reset links and working forgot/reset pages; local development can surface the reset URL directly.
+- Forgot-password email delivery is wired through Resend configuration (`RESEND_API_KEY`, `EMAIL_FROM`) and requires email delivery configuration for known users.
+- Auth sessions are persisted in `AuthSession`; guarded requests require an active unrevoked session, logout revokes the current session, and password reset revokes existing sessions.
+- Notes now load from `/notes`, create through the backend, and save edits through `PATCH /notes/:id` for authenticated workspaces.
+- Projects now load from `/projects`, enforce workspace access on the backend, and create through the backend for authenticated workspaces.
+- SQL snippets now have a guarded `/sql` backend module and authenticated list/create/update wiring in the SQL Library UI.
+- Calendar events now have a guarded `/calendar` backend module, authenticated list/create wiring, and backend-persisted reminder updates.
+- Time tracking now has a guarded `/time` backend module with authenticated list/start/manual/toggle/stop wiring across the dashboard, command palette, and Time Tracker page.
+- Workspace modules have direct routes such as `/tasks`, `/projects`, `/knowledge-base`, `/sql-library`, and `/time-tracker`; old `?view=` links normalize into module routes.
+- Dashboard cards and weekly activity can load authenticated backend analytics and otherwise derive metrics from backend-loaded workspace records.
+- Dashboard widgets can be customized and the visibility preference is persisted locally.
+- Settings includes security, notification, AI, backup, and keyboard shortcut panels with local controls.
+- Root folder verified as folder-only after restructuring.
+- Full app served successfully on `http://localhost:3000` during implementation.
+
+## Known Gaps / Next Work
+
+- Resend must be configured before production password reset emails can be delivered.
+- R2 file uploads require the Cloudflare R2 environment variables listed above; without them authenticated uploads fail clearly instead of creating metadata-only records.
+- Scheduled notification delivery is disabled by default; set `ENABLE_SCHEDULED_NOTIFICATIONS=true` and configure Resend before relying on automated emails.
+- Knowledge article related context is currently resolved from references, tags, names, ticket numbers, and task attachments; formal relation editing tables are still future work.
+- Full Markdown extensions, code editor, full calendar views, data tables, and advanced kanban interactions need deeper modules.
+- Provider-backed AI supports `AI_PROVIDER=auto|openai|groq|puter`, configurable auto provider order, Groq fallback, and Puter configuration through `PUTER_AUTH_TOKEN` and `PUTER_MODEL`. Auto mode can prefer Puter first and skip it after configured monthly usage thresholds before falling back to Groq. AI request logs now show the selected provider chain, Puter budget approvals/skips, provider used, model, endpoint/runtime, status where available, and duration.
+- Root-level monorepo commands were removed to honor the separated client/server folder requirement.
