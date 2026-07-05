@@ -1,7 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
-import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { ConfigModule, ConfigService } from "@nestjs/config";
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AiModule } from "./ai/ai.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { ArticlesModule } from "./articles/articles.module";
@@ -11,6 +11,7 @@ import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { ApiFlowInterceptor } from "./common/logging/api-flow.interceptor";
 import { LoggingModule } from "./common/logging/logging.module";
 import { RequestIdMiddleware } from "./common/logging/request-id.middleware";
+import { RequestSanitizationMiddleware } from "./common/security/request-sanitization.middleware";
 import { FilesModule } from "./files/files.module";
 import { HealthModule } from "./health/health.module";
 import { NotesModule } from "./notes/notes.module";
@@ -29,7 +30,13 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [{
+        ttl: parsePositiveInteger(config.get<string>("RATE_LIMIT_TTL_MS"), 60_000),
+        limit: parsePositiveInteger(config.get<string>("RATE_LIMIT_MAX"), 120)
+      }]
+    }),
     PrismaModule,
     LoggingModule,
     UsersModule,
@@ -52,12 +59,18 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
     AiModule
   ],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_INTERCEPTOR, useClass: ApiFlowInterceptor }
   ]
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestIdMiddleware).forRoutes("*");
+    consumer.apply(RequestSanitizationMiddleware, RequestIdMiddleware).forRoutes("*");
   }
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
