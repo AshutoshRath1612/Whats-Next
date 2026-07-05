@@ -52,6 +52,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { DashboardAnalytics, getDashboardAnalyticsRequest } from "@/lib/workspace/analytics-api";
 import { CreateArticleInput, createArticleRequest, listArticlesRequest, mapApiArticle, updateArticleRequest } from "@/lib/workspace/article-api";
@@ -130,6 +131,7 @@ const dashboardWidgetOptions: Array<{ id: DashboardWidgetId; label: string }> = 
 
 export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: WorkspaceView }) {
   const auth = useAuth();
+  const setNotice = useToast();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -141,7 +143,6 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
   const currentQuery = searchParams.toString();
   const [activeView, setActiveView] = useState<WorkspaceView>(() => parseWorkspaceView(routeView) ?? pathView ?? initialView);
   const [createKind, setCreateKind] = useState<CreateKind | null>(null);
-  const [notice, setNotice] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(routeWorkspaceId);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -1178,7 +1179,7 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
           {activeView === "Tasks" && <TasksView store={store} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} loading={tasksLoading} error={tasksError} initialTaskId={pendingTaskId} onInitialTaskHandled={() => setPendingTaskId(null)} />}
           {activeView === "Projects" && <ProjectsView store={store} openCreate={setCreateKind} onProjectSave={persistProject} onProjectArchive={archiveProject} onProjectUnarchive={unarchiveProject} />}
           {activeView === "Tickets" && <TicketsView store={store} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} />}
-          {activeView === "Knowledge Base" && <KnowledgeView store={store} openCreate={setCreateKind} onArticleSave={persistArticle} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} onNoteSave={persistNote} onSqlSave={persistSqlSnippet} onFileUpdate={updateFileAsset} onFileDelete={deleteFileAsset} onGenerateAiDraft={generateAssistantDraft} initialArticleId={pendingArticleId} onInitialArticleHandled={() => setPendingArticleId(null)} />}
+          {activeView === "Knowledge Base" && <KnowledgeView store={store} openCreate={setCreateKind} notify={setNotice} onArticleSave={persistArticle} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} onNoteSave={persistNote} onSqlSave={persistSqlSnippet} onFileUpdate={updateFileAsset} onFileDelete={deleteFileAsset} onGenerateAiDraft={generateAssistantDraft} initialArticleId={pendingArticleId} onInitialArticleHandled={() => setPendingArticleId(null)} />}
           {activeView === "Notes" && <NotesView store={store} openCreate={setCreateKind} onNoteCreate={createNote} onNoteSave={persistNote} initialNoteId={pendingNoteId} onInitialNoteHandled={() => setPendingNoteId(null)} />}
           {activeView === "SQL Library" && <SqlView store={store} openCreate={setCreateKind} notify={setNotice} onSqlSave={persistSqlSnippet} initialSnippetId={pendingSqlId} onInitialSnippetHandled={() => setPendingSqlId(null)} />}
           {activeView === "Calendar" && <CalendarView store={store} openCreate={setCreateKind} onReminderChange={persistEventReminder} onEventSave={persistCalendarEvent} onEventDelete={deleteCalendarEvent} onTaskUpdate={persistTask} onFileCreate={createFileAsset} />}
@@ -1221,11 +1222,6 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
         </motion.div>
       </AnimatePresence>
       <CreateDialog kind={createKind} workspaceName={activeWorkspace?.name ?? "Workspace"} onClose={() => setCreateKind(null)} store={store} notify={setNotice} onCreateTask={createTask} onCreateArticle={createArticle} onCreateNote={createNote} onCreateProject={createProject} onCreateSql={createSqlSnippet} onCreateEvent={createCalendarEvent} onCreateTemplate={createTemplate} />
-      {notice && (
-        <div className="fixed bottom-5 right-5 z-50 rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-2xl" role="status">
-          {notice}
-        </div>
-      )}
         </>
       )}
     </WorkspaceShell>
@@ -2770,6 +2766,7 @@ function TicketsView({
 function KnowledgeView({
   store,
   openCreate,
+  notify,
   onArticleSave,
   onTaskStatusChange,
   onTaskUpdate,
@@ -2783,6 +2780,7 @@ function KnowledgeView({
   initialArticleId,
   onInitialArticleHandled
 }: ViewProps & {
+  notify: (message: string) => void;
   onArticleSave?: (article: KnowledgeArticle) => Promise<void>;
   onTaskStatusChange?: (taskId: string, status: TaskStatus, previousStatus?: TaskStatus) => void;
   onTaskUpdate?: (task: Task) => Promise<void>;
@@ -2903,7 +2901,7 @@ function KnowledgeView({
       }} />
       <TaskDrawer task={selectedTask} store={store} onClose={() => setSelectedTaskId(null)} onTaskStatusChange={onTaskStatusChange} onTaskUpdate={onTaskUpdate ? (previousTask, nextTask) => { store.upsertTask(nextTask); void onTaskUpdate(nextTask); } : undefined} onPromoteTicket={onPromoteTicket} onFileCreate={onFileCreate} />
       <NoteEditorDialog note={editingNote} open={Boolean(editingNote)} store={store} onClose={() => setEditingNoteId(null)} onSave={async (note) => { if (onNoteSave) await onNoteSave(note); else store.updateNote(note); }} />
-      <SqlEditorDialog snippet={editingSnippet} open={Boolean(editingSnippet)} store={store} notify={() => {}} onClose={() => setEditingSnippetId(null)} onSave={onSqlSave} />
+      <SqlEditorDialog snippet={editingSnippet} open={Boolean(editingSnippet)} store={store} notify={notify} onClose={() => setEditingSnippetId(null)} onSave={onSqlSave} />
       <FileDetailDrawer file={selectedFile} store={store} onClose={() => setSelectedFileId(null)} onUpdate={onFileUpdate} onDelete={onFileDelete} />
     </div>
   );

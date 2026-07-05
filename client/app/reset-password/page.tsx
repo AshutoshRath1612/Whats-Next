@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { resetPasswordRequest } from "@/lib/auth/api";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
+  const toast = useToast();
   const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -27,10 +29,12 @@ export default function ResetPasswordPage() {
 
     if (!token) {
       setError("Reset token is missing.");
+      toast({ title: "Reset token missing", description: "Open the latest reset link and try again.", tone: "warning" });
       return;
     }
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
+      toast({ title: "Passwords do not match", description: "Confirm password must match the new password.", tone: "warning" });
       return;
     }
 
@@ -38,9 +42,12 @@ export default function ResetPasswordPage() {
     try {
       await resetPasswordRequest({ token, password });
       setMessage("Password updated. Redirecting to sign in...");
+      toast({ title: "Password updated", description: "Redirecting to sign in.", tone: "success" });
       window.setTimeout(() => router.replace("/login"), 1200);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to update password");
+      const message = err instanceof Error ? err.message : "Unable to update password";
+      setError(message);
+      toast({ title: "Password update failed", description: message, tone: "error" });
     } finally {
       setSubmitting(false);
     }
