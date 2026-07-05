@@ -7,8 +7,8 @@ import { ChangePasswordDto, UpdateProfileDto } from "./dto";
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  me(userId: string) {
-    return this.prisma.user.findUniqueOrThrow({
+  async me(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
         id: true,
@@ -26,10 +26,11 @@ export class UsersService {
         }
       }
     });
+    return this.withHydratedAvatarUrl(user, userId);
   }
 
-  updateProfile(userId: string, dto: UpdateProfileDto) {
-    return this.prisma.user.update({
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
         name: dto.name,
@@ -38,6 +39,7 @@ export class UsersService {
       },
       select: { id: true, email: true, name: true, avatarUrl: true, timezone: true }
     });
+    return this.withHydratedAvatarUrl(user, userId);
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
@@ -70,5 +72,24 @@ export class UsersService {
       data: { revokedAt: new Date() }
     });
     return { revoked: true };
+  }
+
+  private async withHydratedAvatarUrl<T extends { avatarUrl?: string | null }>(user: T, userId: string) {
+    return { ...user, avatarUrl: await this.resolveAvatarContentUrl(user.avatarUrl, userId) };
+  }
+
+  private async resolveAvatarContentUrl(avatarUrl: string | null | undefined, userId: string) {
+    if (!avatarUrl || (avatarUrl.includes("/files/") && avatarUrl.endsWith("/content"))) return avatarUrl ?? null;
+
+    const file = await this.prisma.fileAsset.findFirst({
+      where: {
+        url: avatarUrl,
+        deletedAt: null,
+        workspace: { members: { some: { userId } } }
+      },
+      select: { id: true }
+    });
+
+    return file ? `/files/${file.id}/content` : avatarUrl;
   }
 }

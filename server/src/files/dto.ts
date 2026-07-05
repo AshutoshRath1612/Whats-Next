@@ -16,7 +16,7 @@ export class CreateFileAssetDto {
   @Min(0)
   size!: number;
 
-  @IsIn(["Task", "Project", "Note", "Backup", "None"])
+  @IsIn(["Task", "Project", "Note", "Backup", "ProfileAvatar", "None"])
   entityType!: string;
 
   @IsString()
@@ -34,7 +34,7 @@ export class UpdateFileAssetDto {
   @IsOptional()
   name?: string;
 
-  @IsIn(["Task", "Project", "Note", "Backup", "None"])
+  @IsIn(["Task", "Project", "Note", "Backup", "ProfileAvatar", "None"])
   @IsOptional()
   entityType?: string;
 

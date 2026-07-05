@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as argon2 from "argon2";
 import { randomUUID } from "crypto";
+import { buildPasswordResetEmail } from "../common/email/email-templates";
 import { PrismaService } from "../prisma/prisma.service";
 import { ForgotPasswordDto, GoogleLoginDto, LoginDto, RegisterDto, ResetPasswordDto } from "./dto";
 
@@ -210,6 +211,10 @@ export class AuthService {
     const apiKey = this.config.get<string>("RESEND_API_KEY");
     const from = this.config.get<string>("EMAIL_FROM");
     if (!apiKey || !from) return false;
+    const message = buildPasswordResetEmail({
+      resetUrl,
+      expiresIn: this.config.get<string>("PASSWORD_RESET_EXPIRES_IN", "30m")
+    });
 
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -220,16 +225,9 @@ export class AuthService {
       body: JSON.stringify({
         from,
         to: email,
-        subject: "Reset your What's Next? password",
-        text: `Use this link to reset your What's Next? password. The link expires soon.\n\n${resetUrl}`,
-        html: `
-        <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#0f172a">
-          <h2>Reset your What's Next? password</h2>
-          <p>Use the button below to choose a new password. This link expires soon.</p>
-          <p><a href="${resetUrl}" style="display:inline-block;border-radius:8px;background:#4F46E5;color:#fff;padding:10px 14px;text-decoration:none">Reset password</a></p>
-          <p style="font-size:12px;color:#64748b">If you did not request this, you can ignore this email.</p>
-        </div>
-      `
+        subject: message.subject,
+        text: message.text,
+        html: message.html
       })
     });
 

@@ -141,7 +141,7 @@ Provider decisions are logged in the API flow logs.
 
 ## Storage Configuration
 
-File uploads and backups require:
+File uploads, backups, and restores require:
 
 ```env
 CLOUDFLARE_R2_ACCOUNT_ID=""
@@ -157,6 +157,8 @@ REQUEST_BODY_LIMIT="100mb"
 FILE_UPLOAD_MAX_BYTES="50mb"
 ```
 
+The Settings page can create manual workspace backups, list previous backup restore points, and restore a workspace from a selected JSON backup. Automatic backups run from the authenticated app while the workspace is open and can be set to every 12 hours, every 24 hours, or off.
+
 The object layout is documented in [docs/STORAGE.md](docs/STORAGE.md).
 
 ## Email Configuration
@@ -166,9 +168,14 @@ Password reset, reminders, summaries, and admin error alerts use Resend:
 ```env
 RESEND_API_KEY=""
 EMAIL_FROM="What's Next? <noreply@example.com>"
+ENABLE_SCHEDULED_NOTIFICATIONS="false"
+SCHEDULED_DAILY_SUMMARY_HOUR="8"
+SCHEDULED_REMINDER_INTERVAL_MINUTES="60"
 ADMIN_ERROR_ALERT_EMAIL=""
 ERROR_ALERT_ENABLED="true"
 ```
+
+Email rendering uses shared branded templates with both HTML and plain-text fallbacks for password reset, AI-written daily summaries, deadline reminders, and admin error alerts.
 
 Details are documented in [docs/EMAIL_AND_AI.md](docs/EMAIL_AND_AI.md).
 

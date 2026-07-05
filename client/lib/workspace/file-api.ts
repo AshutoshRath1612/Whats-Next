@@ -24,6 +24,24 @@ export type StorageUsage = {
   storageError?: string | null;
 };
 
+export type BackupRestoreResult = {
+  restored: boolean;
+  backupId: string;
+  fileName: string;
+  restoredAt: string;
+  summary: {
+    projects: number;
+    tasks: number;
+    notes: number;
+    articles: number;
+    sqlSnippets: number;
+    tickets: number;
+    events: number;
+    templates: number;
+    timeEntries: number;
+  };
+};
+
 async function fileRequest<T>(path: string, token?: string | null, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -50,11 +68,16 @@ export function mapApiFileAsset(file: ApiFileAsset): FileAsset {
     name: file.name,
     type: file.mimeType,
     size: file.size,
-    url: file.url,
+    url: getFileContentUrl(file.id),
     linkedType: parseLinkedType(file.entityType),
     linkedId: file.entityId ?? undefined,
-    uploadedAt: new Date(file.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    uploadedAt: new Date(file.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+    createdAt: file.createdAt
   };
+}
+
+export function getFileContentUrl(fileId: string) {
+  return `${API_URL}/files/${encodeURIComponent(fileId)}/content`;
 }
 
 export function listFilesRequest(token: string | null | undefined, workspaceId: string, query = "") {
@@ -113,8 +136,12 @@ export function updateFileAssetRequest(token: string | null | undefined, fileId:
   });
 }
 
+export function restoreBackupRequest(token: string | null | undefined, fileId: string) {
+  return fileRequest<BackupRestoreResult>(`/files/${fileId}/restore`, token, { method: "POST" });
+}
+
 function parseLinkedType(value?: string | null): FileAsset["linkedType"] {
-  if (value === "Task" || value === "Project" || value === "Note" || value === "Backup") return value;
+  if (value === "Task" || value === "Project" || value === "Note" || value === "Backup" || value === "ProfileAvatar") return value;
   return "None";
 }
 

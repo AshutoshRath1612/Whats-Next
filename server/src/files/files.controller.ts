@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Response } from "express";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ListQuery, parseListQuery } from "../common/list-query";
@@ -30,6 +31,21 @@ export class FilesController {
     return this.files.upload(user.sub, dto);
   }
 
+  @Post(":id/restore")
+  restoreBackup(@CurrentUser() user: CurrentUser, @Param("id") id: string) {
+    return this.files.restoreBackup(user.sub, id);
+  }
+
+  @Get(":id/content")
+  async content(@CurrentUser() user: CurrentUser, @Param("id") id: string, @Res() response: Response) {
+    const file = await this.files.content(user.sub, id);
+    response.setHeader("Content-Type", file.mimeType || "application/octet-stream");
+    response.setHeader("Content-Length", String(file.bytes.length));
+    response.setHeader("Cache-Control", "private, max-age=300");
+    response.setHeader("Content-Disposition", `inline; filename="${encodeHeaderValue(file.name)}"`);
+    response.send(file.bytes);
+  }
+
   @Patch(":id")
   update(@CurrentUser() user: CurrentUser, @Param("id") id: string, @Body() dto: UpdateFileAssetDto) {
     return this.files.update(user.sub, id, dto);
@@ -39,4 +55,8 @@ export class FilesController {
   delete(@CurrentUser() user: CurrentUser, @Param("id") id: string) {
     return this.files.delete(user.sub, id);
   }
+}
+
+function encodeHeaderValue(value: string) {
+  return value.replace(/["\\\r\n]/g, "_");
 }

@@ -57,6 +57,22 @@ test("FilesService stores uploads under readable workspace R2 prefixes", async (
       entityType: "Backup",
       dataBase64: fileBytes
     });
+    await service.upload("user-id", {
+      workspaceId,
+      name: "avatar-user-logo.png",
+      mimeType: "image/png",
+      size: 9,
+      entityType: "ProfileAvatar",
+      dataBase64: fileBytes
+    });
+    await service.upload("user-id", {
+      workspaceId,
+      name: "workspace-note.txt",
+      mimeType: "text/plain",
+      size: 9,
+      entityType: "None",
+      dataBase64: fileBytes
+    });
 
     assert.match(
       requestedUrls[0],
@@ -66,8 +82,20 @@ test("FilesService stores uploads under readable workspace R2 prefixes", async (
       requestedUrls[1],
       /\/workspace-files\/workspaces\/3ee1ed7f-5df1-4bfc-b567-89f0e2e26b44\/backups\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\/whats-next-export-2026-07-03\.json$/
     );
+    assert.match(
+      requestedUrls[2],
+      /\/workspace-files\/workspaces\/3ee1ed7f-5df1-4bfc-b567-89f0e2e26b44\/profiles\/user-id\/avatars\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\/avatar-user-logo\.png$/
+    );
+    assert.match(
+      requestedUrls[3],
+      /\/workspace-files\/workspaces\/3ee1ed7f-5df1-4bfc-b567-89f0e2e26b44\/files\/\d{4}\/\d{2}\/\d{2}\/workspace\/[0-9a-f-]{36}\/workspace-note\.txt$/
+    );
     assert.equal(createdFiles[0].data.entityType, "Task");
     assert.equal(createdFiles[1].data.entityType, "Backup");
+    assert.equal(createdFiles[2].data.entityType, "ProfileAvatar");
+    assert.equal(createdFiles[2].data.entityId, "user-id");
+    assert.equal(createdFiles[3].data.entityType, null);
+    assert.equal(createdFiles[3].data.entityId, null);
   } finally {
     globalThis.fetch = originalFetch;
   }

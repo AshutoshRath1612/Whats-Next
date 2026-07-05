@@ -225,7 +225,8 @@ function normalizeFileAsset(file: Partial<FileAsset>, index: number): FileAsset 
     url: file.url,
     linkedType: file.linkedType ?? "None",
     linkedId: file.linkedId,
-    uploadedAt: file.uploadedAt ?? "Just now"
+    uploadedAt: file.uploadedAt ?? "Just now",
+    createdAt: file.createdAt
   };
 }
 

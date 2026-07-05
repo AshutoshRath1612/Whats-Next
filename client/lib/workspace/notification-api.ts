@@ -13,6 +13,11 @@ export type DailySummaryResult = {
   delivered: boolean;
   subject: string;
   body: string;
+  ai?: {
+    content: string;
+    providerLabel?: string;
+    model?: string;
+  };
 };
 
 async function notificationRequest<T>(path: string, token?: string | null, options: RequestInit = {}): Promise<T> {
