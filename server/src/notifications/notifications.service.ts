@@ -1,5 +1,7 @@
 import { ForbiddenException, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { AiService } from "../ai/ai.service";
+import { buildDailySummaryEmail, buildReminderDigestEmail, EmailMessage } from "../common/email/email-templates";
 import { PrismaService } from "../prisma/prisma.service";
 
 type WorkspaceNotification = {
@@ -11,6 +13,36 @@ type WorkspaceNotification = {
   source: "system" | "workspace";
 };
 
+type DailySummaryTaskRecord = {
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  dueDate: Date | null;
+  timeEstimate: number | null;
+  actualTime: number;
+  customFields: unknown;
+  updatedAt: Date;
+};
+
+type DailySummaryTimeRecord = {
+  title: string;
+  durationMin: number;
+  durationSec: number;
+  status: string;
+  startedAt: Date;
+  task: { title: string; status: string; priority: string } | null;
+};
+
+const dailySummarySystemPrompt = [
+  "You are What's Next?'s daily workspace briefing assistant.",
+  "Write a helpful, email-ready daily summary from only the workspace facts provided.",
+  "Do not invent tasks, blockers, completed work, customers, deadlines, root causes, or time entries.",
+  "If context is thin, say what is known and what is missing.",
+  "Use clear short sections: Top focus, Progress, Risks or blockers, Next actions.",
+  "Keep it concise, professional, and specific. Do not output JSON."
+].join(" ");
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -20,7 +52,8 @@ export class NotificationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly ai: AiService
   ) {}
 
   onModuleInit() {
@@ -113,21 +146,27 @@ export class NotificationsService {
       this.prisma.workspace.findUniqueOrThrow({ where: { id: workspaceId }, select: { name: true } }),
       this.prisma.task.findMany({
         where: { workspaceId, deletedAt: null },
-        select: { title: true, status: true, priority: true, dueDate: true },
+        select: { title: true, description: true, status: true, priority: true, dueDate: true, timeEstimate: true, actualTime: true, customFields: true, updatedAt: true },
         orderBy: [{ dueDate: "asc" }, { updatedAt: "desc" }],
-        take: 20
+        take: 40
       }),
       this.prisma.timeEntry.findMany({
         where: { userId, workspaceId, createdAt: { gte: startOfToday() } },
-        select: { title: true, durationMin: true, status: true },
+        select: { title: true, durationMin: true, durationSec: true, status: true, startedAt: true, task: { select: { title: true, status: true, priority: true } } },
         orderBy: { createdAt: "desc" },
-        take: 10
+        take: 20
       })
     ]);
 
-    const subject = `What's Next? daily summary - ${workspace.name}`;
-    const body = this.buildDailySummary(workspace.name, tasks, timers);
-    await this.sendEmail(user.email, subject, body);
+    const aiSummary = await this.generateAiDailySummary(userId, workspace.name, user.name, tasks, timers);
+    const email = buildDailySummaryEmail({
+      workspaceName: workspace.name,
+      userName: user.name,
+      tasks,
+      timers,
+      aiSummary
+    });
+    await this.sendEmail(user.email, email);
     await this.prisma.notification.create({
       data: {
         workspaceId,
@@ -136,7 +175,7 @@ export class NotificationsService {
       }
     });
 
-    return { delivered: true, subject, body };
+    return { delivered: true, subject: email.subject, body: email.text, ai: aiSummary };
   }
 
   async sendDeadlineReminders(userId: string, workspaceId: string) {
@@ -148,13 +187,8 @@ export class NotificationsService {
     ]);
 
     const actionable = notifications.filter((notification) => notification.title.includes("Due") || notification.title.includes("Overdue") || notification.title.includes("Timer"));
-    const subject = `What's Next? reminders - ${workspace.name}`;
-    const body = [
-      `Reminder digest for ${workspace.name}`,
-      "",
-      ...(actionable.length ? actionable.map((notification) => `- ${notification.title}: ${notification.body}`) : ["- No urgent reminders right now."])
-    ].join("\n");
-    await this.sendEmail(user.email, subject, body);
+    const email = buildReminderDigestEmail({ workspaceName: workspace.name, notifications: actionable });
+    await this.sendEmail(user.email, email);
 
     await this.prisma.notification.create({
       data: {
@@ -164,7 +198,17 @@ export class NotificationsService {
       }
     });
 
-    return { delivered: true, subject, body };
+    return { delivered: true, subject: email.subject, body: email.text };
+  }
+
+  private async generateAiDailySummary(userId: string, workspaceName: string, userName: string, tasks: DailySummaryTaskRecord[], timers: DailySummaryTimeRecord[]) {
+    const prompt = buildAiDailySummaryPrompt({ workspaceName, userName, tasks, timers, now: new Date() });
+    const result = await this.ai.generateText(userId, prompt, dailySummarySystemPrompt);
+    return {
+      content: normalizeAiSummary(result.content),
+      providerLabel: result.providerLabel,
+      model: result.model
+    };
   }
 
   private async sendScheduledDeadlineReminders() {
@@ -204,28 +248,7 @@ export class NotificationsService {
     }
   }
 
-  private buildDailySummary(workspaceName: string, tasks: Array<{ title: string; status: string; priority: string; dueDate: Date | null }>, timers: Array<{ title: string; durationMin: number; status: string }>) {
-    const today = toDateKey(new Date());
-    const open = tasks.filter((task) => task.status !== "DONE" && task.status !== "CANCELED");
-    const dueToday = open.filter((task) => task.dueDate && toDateKey(task.dueDate) <= today).slice(0, 6);
-    const completed = tasks.filter((task) => task.status === "DONE").slice(0, 5);
-    const minutes = timers.reduce((sum, timer) => sum + timer.durationMin, 0);
-
-    return [
-      `Daily summary for ${workspaceName}`,
-      "",
-      `Open work: ${open.length}`,
-      `Tracked today: ${minutes} minutes`,
-      "",
-      "Priority tasks:",
-      ...(dueToday.length ? dueToday.map((task) => `- ${task.title} (${task.priority})`) : ["- No overdue or due-today tasks."]),
-      "",
-      "Completed recently:",
-      ...(completed.length ? completed.map((task) => `- ${task.title}`) : ["- No completed tasks in the latest task window."])
-    ].join("\n");
-  }
-
-  private async sendEmail(to: string, subject: string, text: string) {
+  private async sendEmail(to: string, email: EmailMessage) {
     const apiKey = this.config.get<string>("RESEND_API_KEY");
     const from = this.config.get<string>("EMAIL_FROM", "What's Next? <noreply@whatsnext.local>");
     if (!apiKey || !from) throw new ServiceUnavailableException("Email delivery is not configured.");
@@ -239,8 +262,9 @@ export class NotificationsService {
       body: JSON.stringify({
         from,
         to,
-        subject,
-        text
+        subject: email.subject,
+        text: email.text,
+        html: email.html
       })
     });
 
@@ -270,4 +294,145 @@ function startOfToday() {
 
 function toDateKey(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+function buildAiDailySummaryPrompt(input: { workspaceName: string; userName: string; tasks: DailySummaryTaskRecord[]; timers: DailySummaryTimeRecord[]; now: Date }) {
+  const taskFacts = input.tasks.length
+    ? input.tasks.map((task, index) => formatTaskForAi(task, index)).join("\n\n")
+    : "No tasks found in the latest workspace window.";
+  const timerFacts = input.timers.length
+    ? input.timers.map((timer, index) => formatTimerForAi(timer, index)).join("\n")
+    : "No time entries recorded today.";
+  const openCount = input.tasks.filter((task) => task.status !== "DONE" && task.status !== "CANCELED").length;
+  const completedCount = input.tasks.filter((task) => task.status === "DONE").length;
+  const trackedSeconds = input.timers.reduce((sum, timer) => sum + timer.durationSec, 0);
+
+  return [
+    `Workspace: ${input.workspaceName}`,
+    `User: ${input.userName}`,
+    `Current date: ${input.now.toISOString().slice(0, 10)}`,
+    "",
+    "Summary metrics:",
+    `- Open tasks in provided window: ${openCount}`,
+    `- Completed tasks in provided window: ${completedCount}`,
+    `- Time tracked today: ${formatDuration(trackedSeconds)}`,
+    "",
+    "Tasks:",
+    taskFacts,
+    "",
+    "Today's time entries:",
+    timerFacts,
+    "",
+    "Write the daily summary email content now.",
+    "Use these exact sections:",
+    "## Top focus",
+    "## Progress",
+    "## Risks or blockers",
+    "## Next actions",
+    "",
+    "Rules:",
+    "- Use only the facts above.",
+    "- Mention concrete task names and dates when useful.",
+    "- Prioritize overdue, due-today, high-priority, in-progress, and blocked work.",
+    "- Include progress notes when they are present.",
+    "- If there is not enough context for a section, say what is missing instead of guessing.",
+    "- Keep the whole response under 220 words."
+  ].join("\n");
+}
+
+function formatTaskForAi(task: DailySummaryTaskRecord, index: number) {
+  const customFields = readRecord(task.customFields);
+  const progress = readNumber(customFields.progress);
+  const latestNote = latestTaskNote(customFields.notes);
+  const startDate = readString(customFields.startDate);
+  const severity = readString(customFields.severity);
+  const customer = readString(customFields.customer);
+  const investigation = readString(customFields.investigation);
+  const resolution = readString(customFields.resolution);
+  const closureNotes = readString(customFields.closureNotes);
+  const acceptanceCriteria = readString(customFields.acceptanceCriteria);
+  return [
+    `T${index + 1}: ${task.title}`,
+    `Status: ${formatLabel(task.status)}; Priority: ${formatLabel(task.priority)}${task.dueDate ? `; Due: ${task.dueDate.toISOString().slice(0, 10)}` : ""}; Updated: ${task.updatedAt.toISOString().slice(0, 10)}`,
+    startDate ? `Start date: ${startDate}` : "",
+    typeof progress === "number" ? `Progress: ${progress}%` : "",
+    typeof task.actualTime === "number" || typeof task.timeEstimate === "number" ? `Time: ${formatMinutes(task.actualTime)} spent${typeof task.timeEstimate === "number" ? ` of ${formatMinutes(task.timeEstimate)} estimated` : ""}` : "",
+    task.description ? `Description: ${truncateText(task.description, 260)}` : "",
+    severity ? `Severity: ${severity}` : "",
+    customer ? `Customer: ${customer}` : "",
+    investigation ? `Investigation: ${truncateText(investigation, 220)}` : "",
+    resolution ? `Resolution: ${truncateText(resolution, 220)}` : "",
+    closureNotes ? `Closure notes: ${truncateText(closureNotes, 220)}` : "",
+    acceptanceCriteria ? `Acceptance criteria: ${truncateText(acceptanceCriteria, 220)}` : "",
+    latestNote ? `Latest progress note: ${latestNote.body}${latestNote.createdAt ? ` (${latestNote.createdAt})` : ""}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function formatTimerForAi(timer: DailySummaryTimeRecord, index: number) {
+  return [
+    `E${index + 1}: ${timer.title}`,
+    `Duration: ${formatDuration(timer.durationSec)}; Status: ${formatLabel(timer.status)}; Started: ${timer.startedAt.toISOString()}`,
+    timer.task ? `Linked task: ${timer.task.title} [${formatLabel(timer.task.status)}, ${formatLabel(timer.task.priority)}]` : ""
+  ].filter(Boolean).join(" ");
+}
+
+function normalizeAiSummary(content: string) {
+  return content.trim().replace(/^```(?:text|markdown)?/i, "").replace(/```$/i, "").trim();
+}
+
+function latestTaskNote(value: unknown) {
+  const notes = Array.isArray(value) ? value.filter(isRecord) : [];
+  const first = notes[0];
+  if (!first) return null;
+  const body = readString(first.body);
+  if (!body) return null;
+  return {
+    body: truncateText(body, 220),
+    createdAt: readString(first.createdAt)
+  };
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatMinutes(value: number) {
+  if (value < 60) return `${value}m`;
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  if (hours && minutes) return `${hours}h ${minutes}m`;
+  if (hours) return `${hours}h`;
+  return `${minutes}m`;
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...[truncated]` : value;
 }

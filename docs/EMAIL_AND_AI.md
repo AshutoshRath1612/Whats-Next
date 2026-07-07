@@ -15,14 +15,24 @@ Configure these values in `server/.env`:
 ```env
 RESEND_API_KEY=""
 EMAIL_FROM="What's Next? <noreply@whatsnext.local>"
+ENABLE_SCHEDULED_NOTIFICATIONS="false"
+SCHEDULED_DAILY_SUMMARY_HOUR="8"
+SCHEDULED_REMINDER_INTERVAL_MINUTES="60"
 ```
 
 How email works:
-- Forgot password creates a short-lived reset token and sends a reset link through Resend.
-- Daily summary generates a workspace digest from backend data and emails it through Resend.
-- Deadline reminders generate a reminder digest from backend data and email it through Resend.
+- Forgot password creates a short-lived reset token and sends a branded reset link through Resend.
+- Daily summary is available manually from Settings and can also run automatically when `ENABLE_SCHEDULED_NOTIFICATIONS=true`.
+- The scheduled daily summary job checks once per hour, sends at `SCHEDULED_DAILY_SUMMARY_HOUR`, and sends once per workspace per day to the workspace owner.
+- Daily summary uses backend data for the active workspace as grounded AI context: open tasks, due or overdue work, high-priority work, completed items from the latest task window, task progress notes, and today's tracked time entries.
+- The daily summary email is written by the configured AI provider through `AiService.generateText`, so it uses `AI_PROVIDER`, `AI_AUTO_PROVIDER_ORDER`, Puter budget checks, Groq/OpenAI fallback, and the normal AI provider flow logs.
+- If no AI provider can generate the daily summary, the email is not sent and the API returns the AI provider error instead of silently sending a static digest.
+- Deadline reminders are available manually from Settings and can also run on the scheduled reminder interval.
+- Deadline reminders generate a digest from generated/stored notifications, including overdue tasks, due-today tasks, due-tomorrow tasks, and long-running timers.
 - Resend configuration is required for email actions to succeed.
 - Scheduled delivery requires `ENABLE_SCHEDULED_NOTIFICATIONS=true`.
+- All application emails use shared templates from `server/src/common/email/email-templates.ts`. Each email sends polished HTML plus a plain-text fallback so inboxes, logs, and previews remain readable.
+- Current templated email types are password reset, AI daily summary, reminder digest, and admin API error alert.
 
 ## Admin Error Alerts
 
@@ -55,6 +65,7 @@ API_LOG_FILE_PATH="logs/api-flow.log"
 - `API_LOG_FILE_ENABLED` writes one structured JSON line per API request when set to `true`.
 - `API_LOG_FILE_PATH` is relative to the server process working directory unless an absolute path is provided. The backend prefixes the filename with the request date, so `logs/api-flow.log` writes to files like `logs/2026-07-04_api-flow.log`.
 - Alerts use `RESEND_API_KEY` and `EMAIL_FROM`, so Resend must be configured.
+- Alerts use the same branded HTML/plain-text email renderer as user-facing emails, with metrics, request metadata, sanitized request body, and stack details.
 - Request logs redact sensitive fields such as passwords, tokens, cookies, API keys, secrets, and large file payloads.
 
 ## Current AI Usage

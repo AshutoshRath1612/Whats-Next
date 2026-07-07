@@ -4,9 +4,11 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { forgotPasswordRequest } from "@/lib/auth/api";
 
 export default function ForgotPasswordPage() {
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [resetUrl, setResetUrl] = useState("");
@@ -24,8 +26,11 @@ export default function ForgotPasswordPage() {
       const response = await forgotPasswordRequest(email);
       setMessage("If an account exists, a reset link has been generated.");
       setResetUrl(response.resetUrl ?? "");
+      toast({ title: "Reset link generated", description: "Check your email or use the local reset link.", tone: "success" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to start password reset");
+      const message = err instanceof Error ? err.message : "Unable to start password reset";
+      setError(message);
+      toast({ title: "Reset request failed", description: message, tone: "error" });
     } finally {
       setSubmitting(false);
     }

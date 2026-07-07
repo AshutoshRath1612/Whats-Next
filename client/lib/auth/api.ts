@@ -36,31 +36,31 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-export function loginRequest(input: { email: string; password: string }) {
-  return request<AuthResponse>("/auth/login", {
+export async function loginRequest(input: { email: string; password: string }) {
+  return normalizeAuthResponse(await request<AuthResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify(input)
-  });
+  }));
 }
 
-export function registerRequest(input: { name: string; email: string; password: string }) {
-  return request<AuthResponse>("/auth/register", {
+export async function registerRequest(input: { name: string; email: string; password: string }) {
+  return normalizeAuthResponse(await request<AuthResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify(input)
-  });
+  }));
 }
 
-export function googleLoginRequest(idToken: string) {
-  return request<AuthResponse>("/auth/google", {
+export async function googleLoginRequest(idToken: string) {
+  return normalizeAuthResponse(await request<AuthResponse>("/auth/google", {
     method: "POST",
     body: JSON.stringify({ idToken })
-  });
+  }));
 }
 
-export function meRequest(token?: string | null) {
-  return request<AuthUser>("/users/me", {
+export async function meRequest(token?: string | null) {
+  return normalizeAuthUser(await request<AuthUser>("/users/me", {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined
-  });
+  }));
 }
 
 export function logoutRequest(token?: string | null) {
@@ -84,12 +84,12 @@ export function resetPasswordRequest(input: { token: string; password: string })
   });
 }
 
-export function updateProfileRequest(token: string | null | undefined, input: { name?: string; avatarUrl?: string; timezone?: string }) {
-  return request<AuthUser>("/users/me", {
+export async function updateProfileRequest(token: string | null | undefined, input: { name?: string; avatarUrl?: string; timezone?: string }) {
+  return normalizeAuthUser(await request<AuthUser>("/users/me", {
     method: "PATCH",
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: JSON.stringify(input)
-  });
+  }));
 }
 
 export function changePasswordRequest(token: string | null | undefined, input: { currentPassword: string; nextPassword: string }) {
@@ -111,4 +111,19 @@ export function logoutAllDevicesRequest(token: string | null | undefined) {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : undefined
   });
+}
+
+function normalizeAuthResponse(response: AuthResponse): AuthResponse {
+  return { ...response, user: normalizeAuthUser(response.user) };
+}
+
+function normalizeAuthUser(user: AuthUser): AuthUser {
+  return { ...user, avatarUrl: normalizeApiFileUrl(user.avatarUrl) };
+}
+
+function normalizeApiFileUrl(value?: string | null) {
+  if (!value) return value;
+  if (value.startsWith("/files/")) return `${API_URL.replace(/\/$/, "")}${value}`;
+  if (value.startsWith("/api/")) return `${API_URL.replace(/\/api\/?$/, "")}${value}`;
+  return value;
 }

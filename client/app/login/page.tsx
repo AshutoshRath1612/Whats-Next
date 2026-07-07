@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth/auth-context";
 
 export default function LoginPage() {
   const router = useRouter();
   const auth = useAuth();
+  const toast = useToast();
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -35,9 +37,12 @@ export default function LoginPage() {
           setSubmitting(true);
           try {
             await auth.loginWithGoogle(response.credential);
+            toast({ title: "Signed in", description: "Opening your workspace.", tone: "success" });
             router.replace("/");
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Unable to sign in with Google");
+            const message = err instanceof Error ? err.message : "Unable to sign in with Google";
+            setError(message);
+            toast({ title: "Google sign-in failed", description: message, tone: "error" });
           } finally {
             setSubmitting(false);
           }
@@ -61,7 +66,7 @@ export default function LoginPage() {
     script.defer = true;
     script.onload = initializeGoogle;
     document.head.appendChild(script);
-  }, [auth, googleClientId, router]);
+  }, [auth, googleClientId, router, toast]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -69,9 +74,12 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await auth.login({ email, password });
+      toast({ title: "Signed in", description: "Opening your workspace.", tone: "success" });
       router.replace("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in");
+      const message = err instanceof Error ? err.message : "Unable to sign in";
+      setError(message);
+      toast({ title: "Sign-in failed", description: message, tone: "error" });
     } finally {
       setSubmitting(false);
     }

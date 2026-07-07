@@ -131,8 +131,8 @@
 - Templates support category filtering, favorites, variable fill-in, preview, and filled-copy output.
 - Templates load, create, and save favorite state through authenticated backend APIs.
 - Analytics module with live charts, timeframe/status/priority filters, due/overdue/pending/in-progress counts, average progress, project progress, and time-by-task breakdowns.
-- Settings utility module with backend-backed profile, workspace, security, notification, AI, and R2 backup controls.
-- Settings uploads JSON backups to Cloudflare R2 instead of saving browser-local files.
+- Settings utility module with backend-backed profile, workspace, security, notification, AI, backup, and restore controls.
+- Settings uploads JSON backups to Cloudflare R2, lists saved backup restore points, restores a workspace from a selected backup, and supports app-open automatic backups every 12 or 24 hours.
 - Mobile sidebar drawer for smaller screens.
 - Toast-style feedback for create, copy, upload, and backend action states.
 - Responsive layout for desktop and smaller screens.
@@ -172,7 +172,7 @@
 - Grounded AI ask endpoint with workspace membership checks, intent-aware retrieval, source citations, provider fallback, and message persistence.
 - Ask Workspace Knowledge supports provider-backed RAG activity summaries: period-aware retrieval combines exact timer entries with tasks, ticket-backed tasks, notes, articles, SQL snippets, and file metadata touched in the requested period, then sends the original prompt, retrieval brief, and scored source evidence to the configured AI provider for grounded synthesis.
 - File metadata backend module with authenticated list/create/update/delete, configurable upload limits, storage-health reporting, and server-side Cloudflare R2 uploads with object URLs derived in code from account id and bucket.
-- New R2 uploads use a readable `workspaces/{workspaceId}/files/{yyyy}/{mm}/{dd}/{entityType}/{entityId-or-unlinked}/{uploadId}/{fileName}` layout, with backups under `workspaces/{workspaceId}/backups/{yyyy}/{mm}/{dd}/{uploadId}/{fileName}`.
+- New R2 uploads use readable prefixes for linked files, workspace-level files, profile avatars, and backups. Profile photos now live under `workspaces/{workspaceId}/profiles/{userId}/avatars/{yyyy}/{mm}/{dd}/{uploadId}/{fileName}` instead of a generic unlinked file path.
 - Template backend module with authenticated list/create/update.
 - User profile, password, active sessions, and logout-all-devices endpoints.
 - Workspace update and archive endpoints.
@@ -243,8 +243,9 @@
 - Authenticated users can create a new workspace from the app shell, and archiving the last workspace opens the create-workspace flow.
 - Time entries now carry `workspaceId`, timer list/start/manual flows require the active workspace, and dashboard analytics/notifications filter timers by workspace.
 - Notes now persist backend version history through `NoteVersion`; note updates snapshot the previous version and restore uses the persisted save flow.
-- Settings export uploads a JSON backup to Cloudflare R2 and stores it as a `Backup` file asset.
+- Settings backup creates JSON restore points in Cloudflare R2, stores them as `Backup` file assets, and restores selected backups through a transactional backend endpoint.
 - Scheduled notification delivery is available behind `ENABLE_SCHEDULED_NOTIFICATIONS=true`, with configurable reminder interval and daily summary hour.
+- Password reset, AI-written daily summary, reminder digest, and admin API error alert emails now use shared branded HTML templates with plain-text fallbacks.
 - Prisma migration `20260629130000_workspace_time_and_note_versions` was applied to local PostgreSQL and `npx prisma migrate status` reports the database is up to date.
 - Expiring JWTs are detected client-side; expired sessions are cleared and the login page explains that re-authentication is required.
 - Auth now uses an HttpOnly `whats_next_access_token` cookie on login/register, accepts cookie or bearer JWTs, includes credentials on API calls, and clears the cookie via `/auth/logout`.

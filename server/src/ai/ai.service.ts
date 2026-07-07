@@ -157,8 +157,12 @@ export class AiService {
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
 
   async suggest(userId: string, prompt: string) {
+    return this.generateText(userId, prompt);
+  }
+
+  async generateText(userId: string, prompt: string, systemPrompt = defaultSystemPrompt) {
     await this.prisma.aiMessage.create({ data: { userId, role: "user", content: prompt } });
-    const result = await this.generateProviderResponse(prompt);
+    const result = await this.generateProviderResponse(prompt, systemPrompt);
     await this.prisma.aiMessage.create({ data: { userId, role: "assistant", content: result.content } });
     return {
       content: result.content,

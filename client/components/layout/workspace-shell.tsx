@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -80,6 +81,7 @@ export function WorkspaceShell({
   commandLoading,
   commandItems,
   user,
+  authToken,
   onLogout,
   workspaceName = "Workspace",
   workspaces = [],
@@ -102,6 +104,7 @@ export function WorkspaceShell({
   commandLoading?: boolean;
   commandItems?: CommandResult[];
   user?: { name: string; email: string; avatarUrl?: string | null } | null;
+  authToken?: string | null;
   onLogout?: () => void;
   workspaceName?: string;
   workspaces?: ShellWorkspace[];
@@ -364,11 +367,9 @@ export function WorkspaceShell({
               </Button>
               <div className="hidden items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 lg:flex">
                 {user?.avatarUrl ? (
-                  <img src={user.avatarUrl} alt="" className="h-8 w-8 rounded-lg object-cover" />
+                  <AuthenticatedImage src={user.avatarUrl} token={authToken} alt="" className="h-8 w-8 rounded-lg object-cover" fallback={<AvatarFallback />} />
                 ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <User className="h-4 w-4" />
-                  </div>
+                  <AvatarFallback />
                 )}
                 <div className="min-w-0">
                   <p className="max-w-36 truncate text-xs font-medium">{user?.name ?? "Workspace User"}</p>
@@ -399,4 +400,12 @@ function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function AvatarFallback() {
+  return (
+    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      <User className="h-4 w-4" />
+    </div>
+  );
 }

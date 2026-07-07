@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth/auth-context";
 
 export default function RegisterPage() {
   const router = useRouter();
   const auth = useAuth();
+  const toast = useToast();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,19 +29,24 @@ export default function RegisterPage() {
     setError("");
     if (password !== confirmPassword) {
       setError("Passwords do not match");
+      toast({ title: "Passwords do not match", description: "Confirm password must match the password field.", tone: "warning" });
       return;
     }
     if (password.length < 8) {
       setError("Password must be at least 8 characters");
+      toast({ title: "Password is too short", description: "Use at least 8 characters.", tone: "warning" });
       return;
     }
     setSubmitting(true);
     try {
       await auth.register({ name, email, password });
       setRegistered(true);
+      toast({ title: "Account created", description: "Let’s set up your workspace.", tone: "success" });
       router.replace("/?onboarding=1");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to create account");
+      const message = err instanceof Error ? err.message : "Unable to create account";
+      setError(message);
+      toast({ title: "Account creation failed", description: message, tone: "error" });
     } finally {
       setSubmitting(false);
     }

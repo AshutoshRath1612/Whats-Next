@@ -233,7 +233,7 @@ This file tracks the work needed to turn What's Next? from a polished static she
 
 - [x] Files and settings have navigable placeholder modules.
 - [x] File upload and linking.
-- [x] Import/export flows.
+- [x] Import/export and restore flows.
 - [x] Security, notification, AI, backup, and keyboard shortcut settings.
 - [x] Cloudflare R2 storage for photos, file uploads, and backups.
 - [x] File preview/download/delete.
@@ -260,6 +260,6 @@ This file tracks the work needed to turn What's Next? from a polished static she
 - [x] Scope time entries and time reports by workspace, including manual entries that are not linked to a task.
 - [x] Persist note version history on the backend instead of keeping versions only in the local client state.
 - [x] Add automated scheduled delivery for daily summaries, deadline reminders, and reminder emails instead of manual send actions only.
-- [x] Implement Cloudflare R2-backed backup storage for Settings JSON exports.
+- [x] Implement Cloudflare R2-backed backup storage for Settings JSON exports and backend restore.
 - [x] Re-check Prisma migration status against the local PostgreSQL database and document/apply any required migration repair.
 - [x] Reconcile stale `docs/bugs.txt` entries with implemented fixes and convert any still-relevant items into tracked TODOs.

@@ -42,15 +42,17 @@ import {
   User,
   Workflow
 } from "lucide-react";
-import { CSSProperties, FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { WorkspaceShell } from "@/components/layout/workspace-shell";
 import { CommandResult } from "@/components/layout/command-palette";
+import { AuthenticatedImage } from "@/components/ui/authenticated-image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { DashboardAnalytics, getDashboardAnalyticsRequest } from "@/lib/workspace/analytics-api";
 import { CreateArticleInput, createArticleRequest, listArticlesRequest, mapApiArticle, updateArticleRequest } from "@/lib/workspace/article-api";
@@ -67,7 +69,7 @@ import { CreateProjectInput, archiveProjectRequest, createProjectRequest, listPr
 import { CreateSqlSnippetInput, createSqlSnippetRequest, listSqlSnippetsRequest, mapApiSqlSnippet, updateSqlSnippetRequest } from "@/lib/workspace/sql-api";
 import { CreateCalendarEventInput, deleteCalendarEventRequest, createCalendarEventRequest, listCalendarEventsRequest, mapApiCalendarEvent, updateCalendarEventRequest, updateCalendarReminderRequest } from "@/lib/workspace/calendar-api";
 import { listTimeEntriesRequest, manualTimeEntryRequest, mapApiTimeEntry, startTimeEntryRequest, stopTimeEntryRequest, toggleTimeEntryRequest } from "@/lib/workspace/time-api";
-import { createFileAssetRequest, deleteFileAssetRequest, getStorageUsageRequest, listFilesRequest, mapApiFileAsset, updateFileAssetRequest, uploadFileRequest } from "@/lib/workspace/file-api";
+import { BackupRestoreResult, createFileAssetRequest, deleteFileAssetRequest, getFileContentUrl, getStorageUsageRequest, listFilesRequest, mapApiFileAsset, restoreBackupRequest, updateFileAssetRequest, uploadFileRequest } from "@/lib/workspace/file-api";
 import { changePasswordRequest, listSessionsRequest, logoutAllDevicesRequest, updateProfileRequest } from "@/lib/auth/api";
 import { CreateTemplateInput, createTemplateRequest, listTemplatesRequest, mapApiTemplate, updateTemplateRequest } from "@/lib/workspace/template-api";
 import { listNotificationsRequest, sendDailySummaryRequest, sendDeadlineRemindersRequest, WorkspaceNotification } from "@/lib/workspace/notification-api";
@@ -129,17 +131,18 @@ const dashboardWidgetOptions: Array<{ id: DashboardWidgetId; label: string }> = 
 
 export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: WorkspaceView }) {
   const auth = useAuth();
+  const setNotice = useToast();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const store = useWorkspaceStore();
+  const workspaceStateRef = useRef(store.state);
   const routeView = searchParams.get("view");
   const pathView = parseWorkspaceModuleSlug(pathname.split("/").filter(Boolean)[0] ?? null);
   const routeWorkspaceId = searchParams.get("workspace") ?? "";
   const currentQuery = searchParams.toString();
   const [activeView, setActiveView] = useState<WorkspaceView>(() => parseWorkspaceView(routeView) ?? pathView ?? initialView);
   const [createKind, setCreateKind] = useState<CreateKind | null>(null);
-  const [notice, setNotice] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(routeWorkspaceId);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -168,12 +171,19 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
   const [assistantError, setAssistantError] = useState("");
   const [onboardingComplete, setOnboardingComplete] = useState(true);
   const [backendNotifications, setBackendNotifications] = useState<WorkspaceNotification[]>([]);
+  const [appNotifications, setAppNotifications] = useState<WorkspaceNotification[]>([]);
+  const [autoBackupIntervalHours, setAutoBackupIntervalHours] = useState<0 | 12 | 24>(24);
+  const autoBackupInFlight = useRef(false);
   const localCommandItems = useCommandItems(store);
   const commandItems = useMemo(() => mergeCommandItems(localCommandItems, backendCommandItems), [backendCommandItems, localCommandItems]);
   const localNotifications = useWorkspaceNotifications(store);
-  const shellNotifications = useMemo(() => mergeNotifications(backendNotifications, localNotifications), [backendNotifications, localNotifications]);
+  const shellNotifications = useMemo(() => mergeNotifications([...appNotifications, ...backendNotifications], localNotifications), [appNotifications, backendNotifications, localNotifications]);
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const hasBackendWorkspace = auth.status === "authenticated" && Boolean(activeWorkspace?.id);
+
+  useEffect(() => {
+    workspaceStateRef.current = store.state;
+  }, [store.state]);
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent) {
@@ -555,6 +565,44 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
     };
   }, [activeWorkspace?.id, auth.token, commandQuery]);
 
+  useEffect(() => {
+    if (!hasBackendWorkspace || !activeWorkspace?.id || autoBackupIntervalHours === 0) return;
+
+    let cancelled = false;
+    const intervalMs = autoBackupIntervalHours * 60 * 60 * 1000;
+    const checkIntervalMs = Math.min(intervalMs, 60 * 60 * 1000);
+
+    async function maybeCreateAutomaticBackup() {
+      if (cancelled || autoBackupInFlight.current) return;
+      const latestBackupAt = getLatestBackupCreatedAt(workspaceStateRef.current.files);
+      if (latestBackupAt && Date.now() - latestBackupAt < intervalMs) return;
+
+      autoBackupInFlight.current = true;
+      try {
+        await createWorkspaceBackup("automatic");
+        if (!cancelled) {
+          setNotice("Automatic workspace backup saved.");
+          window.setTimeout(() => setNotice(""), 2600);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStorageConnected(false);
+          setStorageError(error instanceof Error ? error.message : "Automatic workspace backup failed.");
+        }
+      } finally {
+        autoBackupInFlight.current = false;
+      }
+    }
+
+    const firstCheck = window.setTimeout(() => void maybeCreateAutomaticBackup(), 60_000);
+    const interval = window.setInterval(() => void maybeCreateAutomaticBackup(), checkIntervalMs);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(firstCheck);
+      window.clearInterval(interval);
+    };
+  }, [activeWorkspace?.id, activeWorkspace?.name, activeWorkspace?.slug, auth.token, autoBackupIntervalHours, hasBackendWorkspace]);
+
   function requireWorkspaceId() {
     if (!hasBackendWorkspace || !activeWorkspace?.id) {
       throw new Error("Create or select a workspace before changing workspace data.");
@@ -740,11 +788,94 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
     setStorageError(null);
   }
 
-	  async function deleteFileAsset(file: FileAsset) {
+  async function refreshWorkspaceData(workspaceId = requireWorkspaceId()) {
+    const [
+      tasks,
+      projects,
+      sqlSnippets,
+      events,
+      timeEntries,
+      files,
+      templates,
+      articles,
+      notes,
+      analytics,
+      usage
+    ] = await Promise.all([
+      listTasksRequest(auth.token, workspaceId),
+      listProjectsRequest(auth.token, workspaceId, true),
+      listSqlSnippetsRequest(auth.token, workspaceId),
+      listCalendarEventsRequest(auth.token, workspaceId),
+      listTimeEntriesRequest(auth.token, workspaceId),
+      listFilesRequest(auth.token, workspaceId),
+      listTemplatesRequest(auth.token, workspaceId),
+      listArticlesRequest(auth.token, workspaceId),
+      listNotesRequest(auth.token, workspaceId),
+      getDashboardAnalyticsRequest(auth.token, workspaceId).catch(() => null),
+      getStorageUsageRequest(auth.token, workspaceId).catch(() => null)
+    ]);
+
+    store.setTasks(tasks.map(mapApiTask));
+    store.setProjects(projects.map(mapApiProject));
+    store.setSqlSnippets(sqlSnippets.map(mapApiSqlSnippet));
+    store.setEvents(events.map(mapApiCalendarEvent));
+    store.setTimeEntries(timeEntries.map(mapApiTimeEntry));
+    store.setFiles(files.map(mapApiFileAsset));
+    store.setTemplates(templates.map(mapApiTemplate));
+    store.setArticles(articles.map(mapApiArticle));
+    store.setNotes(notes.map(mapApiNote));
+    if (analytics) setDashboardAnalytics(analytics);
+    if (usage) {
+      setStorageUsedBytes(usage.usedBytes);
+      setStorageConnected(usage.storageConnected ?? true);
+      setStorageError(usage.storageError ?? null);
+    }
+  }
+
+  async function createWorkspaceBackup(reason: "manual" | "automatic" = "manual") {
+    const workspaceId = requireWorkspaceId();
+    const createdAt = new Date();
+    const snapshot = {
+      app: "what's next?",
+      kind: "workspace-backup",
+      version: 1,
+      reason,
+      workspaceId,
+      workspaceName: activeWorkspace?.name ?? "Workspace",
+      createdAt: createdAt.toISOString(),
+      state: workspaceStateRef.current
+    };
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const safeWorkspaceName = (activeWorkspace?.slug || activeWorkspace?.name || "workspace").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "workspace";
+    const timestamp = createdAt.toISOString().replace(/[:.]/g, "-");
+    const name = `whats-next-backup-${safeWorkspaceName}-${timestamp}.json`;
+    const backupFile = new File([blob], name, { type: "application/json" });
+    const backup = await uploadFileRequest(auth.token, workspaceId, {
+      name,
+      type: "application/json",
+      size: blob.size,
+      linkedType: "Backup"
+    }, backupFile);
+    const mappedFile = mapApiFileAsset(backup);
+    store.upsertFileAsset(mappedFile);
+    setStorageUsedBytes((currentBytes) => Math.max(currentBytes + mappedFile.size, mappedFile.size));
+    setStorageConnected(true);
+    setStorageError(null);
+    return mappedFile;
+  }
+
+  async function restoreWorkspaceBackup(file: FileAsset) {
+    requireWorkspaceId();
+    const result = await restoreBackupRequest(auth.token, file.id);
+    await refreshWorkspaceData();
+    return result;
+  }
+
+  async function deleteFileAsset(file: FileAsset) {
     requireWorkspaceId();
     store.deleteFileAsset(file.id);
-	    await deleteFileAssetRequest(auth.token, file.id);
-	  }
+    await deleteFileAssetRequest(auth.token, file.id);
+  }
 
 	  async function updateFileAsset(file: FileAsset, input: { name?: string; linkedType?: FileAsset["linkedType"]; linkedId?: string }) {
 	    const nextFile = {
@@ -967,6 +1098,18 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
     }
   }
 
+  function pushAppNotification(input: Pick<WorkspaceNotification, "title" | "body" | "tone">) {
+    const notification: WorkspaceNotification = {
+      id: `app-${Date.now()}`,
+      title: input.title,
+      body: input.body,
+      tone: input.tone,
+      createdAt: new Date().toISOString(),
+      source: "workspace"
+    };
+    setAppNotifications((current) => [notification, ...current].slice(0, 12));
+  }
+
   return (
     <WorkspaceShell
       activeView={activeView}
@@ -977,6 +1120,7 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
       commandLoading={commandLoading}
       commandItems={commandItems}
       user={auth.user}
+      authToken={auth.token}
       workspaceName={activeWorkspace?.name ?? "Workspace"}
       workspaces={workspaces}
       activeWorkspaceId={activeWorkspace?.id}
@@ -1030,12 +1174,12 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
         <>
       <AnimatePresence mode="wait">
         <motion.div key={activeView} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-	          {activeView === "Dashboard" && <DashboardView store={store} setActiveView={setActiveView} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onGenerateAiDraft={generateAssistantDraft} analytics={dashboardAnalytics} analyticsError={dashboardAnalyticsError} onTimerStart={startTimeEntry} onTimerToggle={toggleTimeEntry} onTimerStop={stopTimeEntry} onOpenNote={(noteId) => { setPendingNoteId(noteId); setActiveView("Notes"); }} onOpenFile={(fileId) => { setPendingFileId(fileId); setActiveView("Files"); }} onFileCreate={createFileAsset} />}
+          {activeView === "Dashboard" && <DashboardView store={store} setActiveView={setActiveView} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onGenerateAiDraft={generateAssistantDraft} analytics={dashboardAnalytics} analyticsError={dashboardAnalyticsError} onTimerStart={startTimeEntry} onTimerToggle={toggleTimeEntry} onTimerStop={stopTimeEntry} onOpenNote={(noteId) => { setPendingNoteId(noteId); setActiveView("Notes"); }} onOpenFile={(fileId) => { setPendingFileId(fileId); setActiveView("Files"); }} onFileCreate={createFileAsset} />}
           {activeView === "Workspace" && <WorkspacesView store={store} workspaces={workspaces} activeWorkspaceId={activeWorkspace?.id} onWorkspaceChange={setActiveWorkspaceId} onWorkspaceCreate={() => setWorkspaceCreateOpen(true)} activeWorkspace={activeWorkspace} onWorkspaceSave={saveWorkspaceSettings} onWorkspaceArchive={archiveActiveWorkspace} />}
-	          {activeView === "Tasks" && <TasksView store={store} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} loading={tasksLoading} error={tasksError} initialTaskId={pendingTaskId} onInitialTaskHandled={() => setPendingTaskId(null)} />}
+          {activeView === "Tasks" && <TasksView store={store} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} loading={tasksLoading} error={tasksError} initialTaskId={pendingTaskId} onInitialTaskHandled={() => setPendingTaskId(null)} />}
           {activeView === "Projects" && <ProjectsView store={store} openCreate={setCreateKind} onProjectSave={persistProject} onProjectArchive={archiveProject} onProjectUnarchive={unarchiveProject} />}
-	          {activeView === "Tickets" && <TicketsView store={store} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} />}
-          {activeView === "Knowledge Base" && <KnowledgeView store={store} openCreate={setCreateKind} onArticleSave={persistArticle} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} onNoteSave={persistNote} onSqlSave={persistSqlSnippet} onFileUpdate={updateFileAsset} onFileDelete={deleteFileAsset} onGenerateAiDraft={generateAssistantDraft} initialArticleId={pendingArticleId} onInitialArticleHandled={() => setPendingArticleId(null)} />}
+          {activeView === "Tickets" && <TicketsView store={store} openCreate={setCreateKind} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} />}
+          {activeView === "Knowledge Base" && <KnowledgeView store={store} openCreate={setCreateKind} notify={setNotice} onArticleSave={persistArticle} onTaskStatusChange={persistTaskStatus} onTaskUpdate={persistTask} onPromoteTicket={createTicketArticle} onFileCreate={createFileAsset} onNoteSave={persistNote} onSqlSave={persistSqlSnippet} onFileUpdate={updateFileAsset} onFileDelete={deleteFileAsset} onGenerateAiDraft={generateAssistantDraft} initialArticleId={pendingArticleId} onInitialArticleHandled={() => setPendingArticleId(null)} />}
           {activeView === "Notes" && <NotesView store={store} openCreate={setCreateKind} onNoteCreate={createNote} onNoteSave={persistNote} initialNoteId={pendingNoteId} onInitialNoteHandled={() => setPendingNoteId(null)} />}
           {activeView === "SQL Library" && <SqlView store={store} openCreate={setCreateKind} notify={setNotice} onSqlSave={persistSqlSnippet} initialSnippetId={pendingSqlId} onInitialSnippetHandled={() => setPendingSqlId(null)} />}
           {activeView === "Calendar" && <CalendarView store={store} openCreate={setCreateKind} onReminderChange={persistEventReminder} onEventSave={persistCalendarEvent} onEventDelete={deleteCalendarEvent} onTaskUpdate={persistTask} onFileCreate={createFileAsset} />}
@@ -1045,25 +1189,39 @@ export function ProductWorkspace({ initialView = "Dashboard" }: { initialView?: 
           {activeView === "Files" && <FilesView store={store} notify={setNotice} initialFileId={pendingFileId} onInitialFileHandled={() => setPendingFileId(null)} onFileCreate={createFileAsset} onFileDelete={deleteFileAsset} onFileUpdate={updateFileAsset} />}
           {activeView === "Personal" && <PersonalView store={store} openCreate={setCreateKind} openTasks={() => setActiveView("Tasks")} />}
           {activeView === "Gaming" && <GamingView store={store} openCreate={setCreateKind} openTasks={() => setActiveView("Tasks")} />}
-          {activeView === "Settings" && <UtilityView title={activeView} store={store} notify={setNotice} user={auth.user} token={auth.token} activeWorkspace={activeWorkspace} onWorkspaceSave={saveWorkspaceSettings} onWorkspaceArchive={archiveActiveWorkspace} onProfileSaved={auth.updateUser} onDailySummarySend={async () => {
-            if (!activeWorkspace?.id) throw new Error("No active workspace selected.");
-            const result = await sendDailySummaryRequest(auth.token, activeWorkspace.id);
-            setBackendNotifications(await listNotificationsRequest(auth.token, activeWorkspace.id));
-            return result;
-          }} onDeadlineRemindersSend={async () => {
-            if (!activeWorkspace?.id) throw new Error("No active workspace selected.");
-            const result = await sendDeadlineRemindersRequest(auth.token, activeWorkspace.id);
-            setBackendNotifications(await listNotificationsRequest(auth.token, activeWorkspace.id));
-            return result;
-          }} />}
+          {activeView === "Settings" && (
+            <UtilityView
+              title={activeView}
+              store={store}
+              notify={setNotice}
+              user={auth.user}
+              token={auth.token}
+              activeWorkspace={activeWorkspace}
+              onWorkspaceSave={saveWorkspaceSettings}
+              onWorkspaceArchive={archiveActiveWorkspace}
+              onProfileSaved={auth.updateUser}
+              onBackupCreate={createWorkspaceBackup}
+              onBackupRestore={restoreWorkspaceBackup}
+              autoBackupIntervalHours={autoBackupIntervalHours}
+              onAutoBackupIntervalChange={setAutoBackupIntervalHours}
+              onTestNotification={pushAppNotification}
+              onDailySummarySend={async () => {
+                if (!activeWorkspace?.id) throw new Error("No active workspace selected.");
+                const result = await sendDailySummaryRequest(auth.token, activeWorkspace.id);
+                setBackendNotifications(await listNotificationsRequest(auth.token, activeWorkspace.id));
+                return result;
+              }}
+              onDeadlineRemindersSend={async () => {
+                if (!activeWorkspace?.id) throw new Error("No active workspace selected.");
+                const result = await sendDeadlineRemindersRequest(auth.token, activeWorkspace.id);
+                setBackendNotifications(await listNotificationsRequest(auth.token, activeWorkspace.id));
+                return result;
+              }}
+            />
+          )}
         </motion.div>
       </AnimatePresence>
       <CreateDialog kind={createKind} workspaceName={activeWorkspace?.name ?? "Workspace"} onClose={() => setCreateKind(null)} store={store} notify={setNotice} onCreateTask={createTask} onCreateArticle={createArticle} onCreateNote={createNote} onCreateProject={createProject} onCreateSql={createSqlSnippet} onCreateEvent={createCalendarEvent} onCreateTemplate={createTemplate} />
-      {notice && (
-        <div className="fixed bottom-5 right-5 z-50 rounded-xl border border-border bg-card px-4 py-3 text-sm shadow-2xl" role="status">
-          {notice}
-        </div>
-      )}
         </>
       )}
     </WorkspaceShell>
@@ -2608,6 +2766,7 @@ function TicketsView({
 function KnowledgeView({
   store,
   openCreate,
+  notify,
   onArticleSave,
   onTaskStatusChange,
   onTaskUpdate,
@@ -2621,6 +2780,7 @@ function KnowledgeView({
   initialArticleId,
   onInitialArticleHandled
 }: ViewProps & {
+  notify: (message: string) => void;
   onArticleSave?: (article: KnowledgeArticle) => Promise<void>;
   onTaskStatusChange?: (taskId: string, status: TaskStatus, previousStatus?: TaskStatus) => void;
   onTaskUpdate?: (task: Task) => Promise<void>;
@@ -2741,7 +2901,7 @@ function KnowledgeView({
       }} />
       <TaskDrawer task={selectedTask} store={store} onClose={() => setSelectedTaskId(null)} onTaskStatusChange={onTaskStatusChange} onTaskUpdate={onTaskUpdate ? (previousTask, nextTask) => { store.upsertTask(nextTask); void onTaskUpdate(nextTask); } : undefined} onPromoteTicket={onPromoteTicket} onFileCreate={onFileCreate} />
       <NoteEditorDialog note={editingNote} open={Boolean(editingNote)} store={store} onClose={() => setEditingNoteId(null)} onSave={async (note) => { if (onNoteSave) await onNoteSave(note); else store.updateNote(note); }} />
-      <SqlEditorDialog snippet={editingSnippet} open={Boolean(editingSnippet)} store={store} notify={() => {}} onClose={() => setEditingSnippetId(null)} onSave={onSqlSave} />
+      <SqlEditorDialog snippet={editingSnippet} open={Boolean(editingSnippet)} store={store} notify={notify} onClose={() => setEditingSnippetId(null)} onSave={onSqlSave} />
       <FileDetailDrawer file={selectedFile} store={store} onClose={() => setSelectedFileId(null)} onUpdate={onFileUpdate} onDelete={onFileDelete} />
     </div>
   );
@@ -4641,7 +4801,7 @@ function FilesView({
           <div className="grid gap-3 md:grid-cols-2">
             <LabeledField label="Link type">
               <select value={linkedType} onChange={(event) => { setLinkedType(event.target.value as FileAsset["linkedType"]); setLinkedId(""); }} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
-                {(["None", "Task", "Project", "Note"] as FileAsset["linkedType"][]).map((type) => <option key={type}>{type}</option>)}
+                {(["None", "Task", "Project", "Note", "ProfileAvatar"] as FileAsset["linkedType"][]).map((type) => <option key={type} value={type}>{formatFileLinkedType(type)}</option>)}
               </select>
             </LabeledField>
             <LabeledField label="Linked item">
@@ -4740,7 +4900,7 @@ function FileDetailDrawer({ file, store, onClose, onDelete, onUpdate }: { file: 
           <div className="grid gap-3 sm:grid-cols-2">
             <LabeledField label="Link type">
               <select value={linkedType} onChange={(event) => { setLinkedType(event.target.value as FileAsset["linkedType"]); setLinkedId(""); }} className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm">
-                {(["None", "Task", "Project", "Note"] as FileAsset["linkedType"][]).map((type) => <option key={type}>{type}</option>)}
+                {(["None", "Task", "Project", "Note", "ProfileAvatar"] as FileAsset["linkedType"][]).map((type) => <option key={type} value={type}>{formatFileLinkedType(type)}</option>)}
               </select>
             </LabeledField>
             <LabeledField label="Linked item">
@@ -4773,7 +4933,31 @@ function getFileLinkOptions(store: ReturnType<typeof useWorkspaceStore>, linkedT
 function getFileLinkLabel(store: ReturnType<typeof useWorkspaceStore>, file: FileAsset) {
   if (file.linkedType === "None") return "workspace";
   if (file.linkedType === "Backup") return "workspace backup";
+  if (file.linkedType === "ProfileAvatar") return "profile avatar";
   return getFileLinkOptions(store, file.linkedType).find((option) => option.id === file.linkedId)?.title ?? file.linkedType.toLowerCase();
+}
+
+function formatFileLinkedType(type: FileAsset["linkedType"]) {
+  if (type === "ProfileAvatar") return "Profile avatar";
+  return type;
+}
+
+function getLatestBackupCreatedAt(files: FileAsset[]) {
+  return files
+    .filter((file) => file.linkedType === "Backup")
+    .map(backupTimestamp)
+    .filter((timestamp) => Number.isFinite(timestamp))
+    .sort((left, right) => right - left)[0] ?? null;
+}
+
+function backupTimestamp(file: FileAsset) {
+  return new Date(file.createdAt ?? file.uploadedAt).getTime();
+}
+
+function formatBackupDate(file: FileAsset) {
+  const timestamp = backupTimestamp(file);
+  if (!Number.isFinite(timestamp)) return file.uploadedAt;
+  return new Date(timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function downloadFileAsset(file: FileAsset) {
@@ -5029,6 +5213,11 @@ function UtilityView({
   onWorkspaceSave,
   onWorkspaceArchive,
   onProfileSaved,
+  onBackupCreate,
+  onBackupRestore,
+  autoBackupIntervalHours,
+  onAutoBackupIntervalChange,
+  onTestNotification,
   onDailySummarySend,
   onDeadlineRemindersSend
 }: {
@@ -5041,6 +5230,11 @@ function UtilityView({
   onWorkspaceSave?: (input: { name?: string; slug?: string; icon?: string; color?: string }) => Promise<void>;
   onWorkspaceArchive?: () => Promise<void>;
   onProfileSaved?: (user: NonNullable<ReturnType<typeof useAuth>["user"]>) => void;
+  onBackupCreate?: (reason?: "manual" | "automatic") => Promise<FileAsset>;
+  onBackupRestore?: (file: FileAsset) => Promise<BackupRestoreResult>;
+  autoBackupIntervalHours: 0 | 12 | 24;
+  onAutoBackupIntervalChange: (hours: 0 | 12 | 24) => void;
+  onTestNotification?: (notification: Pick<WorkspaceNotification, "title" | "body" | "tone">) => void;
   onDailySummarySend?: () => Promise<{ delivered: boolean; subject: string; body: string }>;
   onDeadlineRemindersSend?: () => Promise<{ delivered: boolean; subject: string; body: string }>;
 }) {
@@ -5048,8 +5242,12 @@ function UtilityView({
   const [dailySummary, setDailySummary] = useState(true);
   const [deadlineAlerts, setDeadlineAlerts] = useState(true);
   const [aiEnabled, setAiEnabled] = useState(true);
-  const [backupFrequency, setBackupFrequency] = useState("Weekly");
   const [shortcutHints, setShortcutHints] = useState(true);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
+  const [backupSaving, setBackupSaving] = useState(false);
+  const [backupRestoringId, setBackupRestoringId] = useState("");
+  const [restoreConfirmId, setRestoreConfirmId] = useState("");
+  const [backupMessage, setBackupMessage] = useState("");
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileAvatar, setProfileAvatar] = useState(user?.avatarUrl ?? "");
   const [profileAvatarFile, setProfileAvatarFile] = useState<File | null>(null);
@@ -5064,6 +5262,20 @@ function UtilityView({
   const [nextPassword, setNextPassword] = useState("");
   const [sessions, setSessions] = useState<Array<{ id: string; createdAt: string; expiresAt: string; revokedAt?: string | null }>>([]);
   const [summaryPreview, setSummaryPreview] = useState("");
+  const backupFiles = useMemo(() => store.state.files
+    .filter((file) => file.linkedType === "Backup")
+    .sort((left, right) => backupTimestamp(right) - backupTimestamp(left)), [store.state.files]);
+  const activeAlerts = useWorkspaceNotifications(store);
+  const calendarReminderEvents = useMemo(() => store.state.events.filter((event) => event.reminderEnabled), [store.state.events]);
+  const runningTimer = store.metrics.runningTimer?.status === "Running" ? store.metrics.runningTimer : null;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    setNotificationPermission(Notification.permission);
+  }, []);
 
   useEffect(() => {
     setProfileName(user?.name ?? "");
@@ -5086,20 +5298,46 @@ function UtilityView({
       .catch(() => setSessions([]));
   }, [title, token]);
 
-  async function exportWorkspace() {
-    if (!activeWorkspace?.id) throw new Error("Select a workspace before creating a backup.");
-    const blob = new Blob([JSON.stringify(store.state, null, 2)], { type: "application/json" });
-    const name = `whats-next-export-${new Date().toISOString().slice(0, 10)}.json`;
-    const backupFile = new File([blob], name, { type: "application/json" });
-    const backup = await uploadFileRequest(token, activeWorkspace.id, {
-      name,
-      type: "application/json",
-      size: blob.size,
-      linkedType: "Backup"
-    }, backupFile);
-    store.upsertFileAsset(mapApiFileAsset(backup));
-    notify("Workspace backup uploaded.");
-    window.setTimeout(() => notify(""), 3200);
+  async function createManualBackup() {
+    setBackupSaving(true);
+    setBackupMessage("");
+    try {
+      const backup = await onBackupCreate?.("manual");
+      setBackupMessage(backup ? `Backup saved: ${backup.name}` : "Backup saved.");
+      notify("Workspace backup uploaded.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workspace backup failed.";
+      setBackupMessage(message);
+      notify(message);
+    } finally {
+      setBackupSaving(false);
+      window.setTimeout(() => notify(""), 3200);
+    }
+  }
+
+  async function restoreBackup(file: FileAsset) {
+    if (restoreConfirmId !== file.id) {
+      setRestoreConfirmId(file.id);
+      setBackupMessage(`Ready to restore ${file.name}. Click confirm restore to replace workspace records from this backup.`);
+      return;
+    }
+
+    setBackupRestoringId(file.id);
+    setBackupMessage("");
+    try {
+      const result = await onBackupRestore?.(file);
+      const summary = result?.summary;
+      setBackupMessage(summary ? `Restored ${summary.tasks} tasks, ${summary.projects} projects, ${summary.notes} notes, ${summary.articles} articles, ${summary.sqlSnippets} SQL snippets, ${summary.events} events, ${summary.templates} templates, and ${summary.timeEntries} time entries.` : "Workspace restored.");
+      notify("Workspace restored from backup.");
+      setRestoreConfirmId("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workspace restore failed.";
+      setBackupMessage(message);
+      notify(message);
+    } finally {
+      setBackupRestoringId("");
+      window.setTimeout(() => notify(""), 3600);
+    }
   }
 
   async function uploadProfileAvatar() {
@@ -5111,9 +5349,36 @@ function UtilityView({
       name: uploadName,
       type: profileAvatarFile.type || "application/octet-stream",
       size: profileAvatarFile.size,
-      linkedType: "None"
+      linkedType: "ProfileAvatar",
+      linkedId: user?.id
     }, profileAvatarFile);
-    return uploaded.url;
+    return getFileContentUrl(uploaded.id);
+  }
+
+  async function requestSettingsNotificationPermission() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    notify(permission === "granted" ? "Browser notifications enabled." : "Browser notifications not enabled.");
+    window.setTimeout(() => notify(""), 2400);
+  }
+
+  function sendTestBrowserNotification() {
+    onTestNotification?.({
+      title: "Test notification",
+      body: "Notifications are visible inside What's Next?.",
+      tone: "success"
+    });
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      new Notification("What's Next? test notification", {
+        body: "Notifications are ready for this browser."
+      });
+    }
+    notify("Test notification added to the app.");
+    window.setTimeout(() => notify(""), 2200);
   }
 
   return (
@@ -5124,7 +5389,7 @@ function UtilityView({
           <p className="text-sm text-muted-foreground">Current workspace has {store.state.tasks.length} tasks, {store.state.notes.length} notes, {store.state.tasks.filter((task) => task.workType === "Ticket").length} ticket tasks, and {store.state.sqlSnippets.length} SQL snippets.</p>
           {isControlPage && (
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button variant="outline" onClick={() => void exportWorkspace()}>Upload backup</Button>
+              <Button variant="outline" disabled={backupSaving} onClick={() => void createManualBackup()}>{backupSaving ? "Saving backup..." : "Create backup"}</Button>
             </div>
           )}
         </CardContent>
@@ -5133,7 +5398,7 @@ function UtilityView({
         <div className="grid gap-4 lg:grid-cols-2">
           <SettingsPanel title="Profile">
             <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-3">
-              {profileAvatar ? <img src={profileAvatar} alt="" className="h-14 w-14 rounded-xl object-cover" /> : <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary"><User className="h-6 w-6" /></div>}
+              {profileAvatar ? <AuthenticatedImage src={profileAvatar} token={token} alt="" className="h-14 w-14 rounded-xl object-cover" fallback={<ProfileAvatarFallback />} /> : <ProfileAvatarFallback />}
               <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-medium transition hover:bg-secondary">
                 Attach photo
                 <input
@@ -5169,8 +5434,8 @@ function UtilityView({
                 const avatarUrl = await uploadProfileAvatar();
                 const updatedUser = await updateProfileRequest(token, { name: profileName, avatarUrl, timezone: profileTimezone });
                 setProfileAvatarFile(null);
-                setProfileAvatar(avatarUrl ?? "");
-                setProfileMessage(avatarUrl ? "Profile saved. Photo uploaded." : "Profile saved.");
+                setProfileAvatar(updatedUser.avatarUrl ?? avatarUrl ?? "");
+                setProfileMessage(updatedUser.avatarUrl || avatarUrl ? "Profile saved. Photo uploaded." : "Profile saved.");
                 onProfileSaved?.(updatedUser);
                 notify("Profile settings saved.");
               } catch (error) {
@@ -5256,31 +5521,48 @@ function UtilityView({
           <SettingsPanel title="Notifications">
             <ToggleRow label="Daily summary" checked={dailySummary} onChange={setDailySummary} />
             <ToggleRow label="Upcoming deadline alerts" checked={deadlineAlerts} onChange={setDeadlineAlerts} />
-            <SettingsRow label="Browser permission" value={typeof Notification === "undefined" ? "Unsupported" : Notification.permission} />
-            <HelpBlock
-              title="Resend email setup"
-              body="Email delivery uses the Resend API. Add RESEND_API_KEY and a verified EMAIL_FROM sender in the server env. Password reset, daily summaries, and reminder digests require Resend configuration."
-            />
-            <Button variant="outline" disabled={!dailySummary} onClick={async () => {
-              try {
-                const result = await onDailySummarySend?.();
-                setSummaryPreview(result?.body ?? "");
-                notify(result?.delivered ? "Daily summary emailed." : "Daily summary delivery failed.");
-              } catch (error) {
-                notify(error instanceof Error ? error.message : "Could not send daily summary.");
-              }
-              window.setTimeout(() => notify(""), 2600);
-            }}>Send daily summary now</Button>
-            <Button variant="outline" disabled={!deadlineAlerts} onClick={async () => {
-              try {
-                const result = await onDeadlineRemindersSend?.();
-                setSummaryPreview(result?.body ?? "");
-                notify(result?.delivered ? "Reminder digest emailed." : "Reminder delivery failed.");
-              } catch (error) {
-                notify(error instanceof Error ? error.message : "Could not send reminders.");
-              }
-              window.setTimeout(() => notify(""), 2600);
-            }}>Send reminders now</Button>
+            <SettingsRow label="Browser permission" value={formatNotificationPermission(notificationPermission)} />
+            <SettingsRow label="Active alerts" value={`${activeAlerts.length}`} />
+            <SettingsRow label="Calendar reminders" value={`${calendarReminderEvents.length}`} />
+            <SettingsRow label="Running timer" value={runningTimer ? runningTimer.title : "None"} />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" disabled={notificationPermission === "granted" || notificationPermission === "unsupported"} onClick={() => void requestSettingsNotificationPermission()}>Enable browser alerts</Button>
+              <Button variant="outline" onClick={sendTestBrowserNotification}>Send test alert</Button>
+              <Button variant="outline" disabled={!dailySummary} onClick={async () => {
+                try {
+                  const result = await onDailySummarySend?.();
+                  setSummaryPreview(result?.body ?? "");
+                  notify(result?.delivered ? "Daily summary emailed." : "Daily summary delivery failed.");
+                } catch (error) {
+                  notify(error instanceof Error ? error.message : "Could not send daily summary.");
+                }
+                window.setTimeout(() => notify(""), 2600);
+              }}>Send AI summary</Button>
+              <Button variant="outline" disabled={!deadlineAlerts} onClick={async () => {
+                try {
+                  const result = await onDeadlineRemindersSend?.();
+                  setSummaryPreview(result?.body ?? "");
+                  notify(result?.delivered ? "Reminder digest emailed." : "Reminder delivery failed.");
+                } catch (error) {
+                  notify(error instanceof Error ? error.message : "Could not send reminders.");
+                }
+                window.setTimeout(() => notify(""), 2600);
+              }}>Send reminder digest</Button>
+            </div>
+            <div className="space-y-2">
+              {activeAlerts.length === 0 && <p className="rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">No active task or timer alerts.</p>}
+              {activeAlerts.slice(0, 3).map((alert) => (
+                <div key={alert.id} className={cn("rounded-lg border border-border bg-background p-3", alert.tone === "warning" && "border-amber-200 bg-amber-50 dark:border-amber-400/20 dark:bg-amber-400/10")}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">{alert.title}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{alert.body}</p>
+                    </div>
+                    <Badge className={alert.tone === "warning" ? "border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100" : ""}>{alert.tone === "warning" ? "Attention" : "Info"}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
             {summaryPreview && <pre className="max-h-44 overflow-auto rounded-lg border border-border bg-secondary/50 p-3 text-xs text-muted-foreground">{summaryPreview}</pre>}
           </SettingsPanel>
           <SettingsPanel title="AI">
@@ -5292,13 +5574,39 @@ function UtilityView({
               body="AI is used in Dashboard suggestions, Dashboard summarize, command-palette AI search, daily-summary generation, Knowledge Base analysis, and workflow drafts for notes, tickets, SQL explanations, RCA, and professional emails."
             />
           </SettingsPanel>
-          <SettingsPanel title="Backup">
-            <LabeledField label="Backup frequency">
-              <select value={backupFrequency} onChange={(event) => setBackupFrequency(event.target.value)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
-                {["Daily", "Weekly", "Monthly"].map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </LabeledField>
-            <SettingsRow label="Manual export" value="Available as JSON" />
+          <SettingsPanel title="Backup and Restore">
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <LabeledField label="Automatic backup">
+                <select value={String(autoBackupIntervalHours)} onChange={(event) => onAutoBackupIntervalChange(Number(event.target.value) as 0 | 12 | 24)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
+                  <option value="24">Every 24 hours</option>
+                  <option value="12">Every 12 hours</option>
+                  <option value="0">Off</option>
+                </select>
+              </LabeledField>
+              <Button className="self-end" disabled={backupSaving} onClick={() => void createManualBackup()}>{backupSaving ? "Saving..." : "Create backup"}</Button>
+            </div>
+            <SettingsRow label="Saved backups" value={`${backupFiles.length} restore point${backupFiles.length === 1 ? "" : "s"}`} />
+            {backupMessage && <p className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs leading-5 text-muted-foreground">{backupMessage}</p>}
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {backupFiles.length === 0 && <p className="rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">No backups saved yet.</p>}
+              {backupFiles.map((file) => {
+                const isConfirming = restoreConfirmId === file.id;
+                const isRestoring = backupRestoringId === file.id;
+                return (
+                  <div key={file.id} className={cn("rounded-xl border border-border bg-background p-3", isConfirming && "border-amber-300 bg-amber-50 dark:border-amber-400/30 dark:bg-amber-400/10")}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{file.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{formatBackupDate(file)} - {formatFileSize(file.size)}</p>
+                      </div>
+                      <Button variant={isConfirming ? undefined : "outline"} size="sm" disabled={Boolean(backupRestoringId)} onClick={() => void restoreBackup(file)}>
+                        {isRestoring ? "Restoring..." : isConfirming ? "Confirm restore" : "Restore"}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </SettingsPanel>
           <SettingsPanel title="Application Controls">
             <SettingsRow label="Default module" value="Dashboard" />
@@ -5325,6 +5633,14 @@ function SettingsPanel({ title, children }: { title: string; children: ReactNode
       <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
       <CardContent className="space-y-3">{children}</CardContent>
     </Card>
+  );
+}
+
+function ProfileAvatarFallback() {
+  return (
+    <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <User className="h-6 w-6" />
+    </div>
   );
 }
 

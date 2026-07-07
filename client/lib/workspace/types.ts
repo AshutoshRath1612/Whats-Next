@@ -188,9 +188,10 @@ export type FileAsset = {
   type: string;
   size: number;
   url?: string;
-  linkedType: "Task" | "Project" | "Note" | "Backup" | "None";
+  linkedType: "Task" | "Project" | "Note" | "Backup" | "ProfileAvatar" | "None";
   linkedId?: string;
   uploadedAt: string;
+  createdAt?: string;
 };
 
 export type TimeEntry = {

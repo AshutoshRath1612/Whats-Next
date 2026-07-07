@@ -1,7 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { buildAdminErrorEmail } from "../email/email-templates";
 import { ApiErrorAlertInput } from "./api-log.types";
-import { getErrorMessage, getErrorName, sanitizeForLog, truncate } from "./log-sanitizer";
+import { getErrorMessage, getErrorName, sanitizeForLog } from "./log-sanitizer";
 
 @Injectable()
 export class ErrorAlertService {
@@ -31,8 +32,26 @@ export class ErrorAlertService {
     if (Date.now() - previousSentAt < cooldownMs) return;
     this.sentAtByFingerprint.set(fingerprint, Date.now());
 
-    const subject = `[What's Next?] API error ${statusCode} ${input.method} ${input.route ?? input.path}`;
-    const text = buildAlertText(input);
+    const message = buildAdminErrorEmail({
+      requestId: input.requestId,
+      statusCode,
+      method: input.method,
+      path: input.path,
+      route: input.route,
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      startedAt: input.startedAt,
+      completedAt: input.completedAt,
+      durationMs: input.durationMs,
+      errorName: input.errorName ?? getErrorName(input.error),
+      errorMessage: input.errorMessage ?? getErrorMessage(input.error),
+      query: sanitizeForLog(input.query ?? {}),
+      params: sanitizeForLog(input.params ?? {}),
+      body: sanitizeForLog(input.body ?? {}),
+      stack: input.errorStack ?? (input.error instanceof Error ? input.error.stack ?? "" : "")
+    });
 
     try {
       const response = await fetch("https://api.resend.com/emails", {
@@ -41,7 +60,7 @@ export class ErrorAlertService {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ from, to, subject, text })
+        body: JSON.stringify({ from, to, subject: message.subject, text: message.text, html: message.html })
       });
 
       if (!response.ok) {
@@ -52,38 +71,4 @@ export class ErrorAlertService {
       this.logger.warn(`Error alert email failed for request ${input.requestId}: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
-}
-
-function buildAlertText(input: ApiErrorAlertInput) {
-  return [
-    "What's Next? API error alert",
-    "",
-    `Request ID: ${input.requestId}`,
-    `Status: ${input.statusCode ?? 500}`,
-    `Method: ${input.method}`,
-    `Path: ${input.path}`,
-    `Route: ${input.route ?? "unknown"}`,
-    `User ID: ${input.userId ?? "anonymous"}`,
-    `Workspace ID: ${input.workspaceId ?? "none"}`,
-    `IP: ${input.ip ?? "unknown"}`,
-    `User agent: ${input.userAgent ?? "unknown"}`,
-    `Started: ${input.startedAt.toISOString()}`,
-    `Completed: ${input.completedAt.toISOString()}`,
-    `Duration: ${input.durationMs}ms`,
-    "",
-    `Error: ${input.errorName ?? getErrorName(input.error)}`,
-    `Message: ${input.errorMessage ?? getErrorMessage(input.error)}`,
-    "",
-    "Query:",
-    JSON.stringify(sanitizeForLog(input.query ?? {}), null, 2),
-    "",
-    "Params:",
-    JSON.stringify(sanitizeForLog(input.params ?? {}), null, 2),
-    "",
-    "Body:",
-    JSON.stringify(sanitizeForLog(input.body ?? {}), null, 2),
-    "",
-    "Stack:",
-    truncate(input.errorStack ?? (input.error instanceof Error ? input.error.stack ?? "" : ""), 4_000)
-  ].join("\n");
 }

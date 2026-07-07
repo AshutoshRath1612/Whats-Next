@@ -187,11 +187,15 @@ Uploads go through the backend and are stored in Cloudflare R2. The frontend avo
 Object layout:
 
 ```text
-workspaces/{workspaceId}/files/{yyyy}/{mm}/{dd}/{entityType}/{entityId-or-unlinked}/{uploadId}/{fileName}
+workspaces/{workspaceId}/files/{yyyy}/{mm}/{dd}/{entityType}/{entityId-or-unassigned}/{uploadId}/{fileName}
+workspaces/{workspaceId}/files/{yyyy}/{mm}/{dd}/workspace/{uploadId}/{fileName}
+workspaces/{workspaceId}/profiles/{userId}/avatars/{yyyy}/{mm}/{dd}/{uploadId}/{fileName}
 workspaces/{workspaceId}/backups/{yyyy}/{mm}/{dd}/{uploadId}/{fileName}
 ```
 
-The backend records file metadata in `FileAsset` and audits create/update/delete operations.
+The backend records file metadata in `FileAsset`, audits create/update/delete operations, and exposes authenticated `/api/files/{id}/content` streaming so the UI does not need to render private R2 object URLs directly.
+
+Workspace backups are uploaded as JSON `Backup` file assets. The Settings page lists those saved restore points, lets the user create a manual backup, and can restore from a selected backup through `POST /api/files/{id}/restore`. Restore is transactional: it validates workspace access, reads the JSON object from R2, replaces workspace records in PostgreSQL, relinks file assets where possible, and writes an audit log entry. Automatic backups are client-scheduled while the authenticated app is open, with 12-hour, 24-hour, or off settings.
 
 ## Observability
 

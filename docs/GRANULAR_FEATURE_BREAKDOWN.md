@@ -888,6 +888,9 @@ A ticket is a type of task as well. for any office related work we work on ticke
 - Export workspace.
 - Import data.
 - Backup settings.
+- List previous backups.
+- Restore workspace from a selected backup.
+- Automatic backup cadence: every 12 hours, every 24 hours, or off.
 
 ### 21.8 Keyboard Shortcuts
 
