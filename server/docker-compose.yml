@@ -1,0 +1,26 @@
+services:
+  backend:
+    image: ghcr.io/ashutoshrath1612/whats-next-api:latest
+    container_name: whats-next-api
+
+    restart: unless-stopped
+
+    ports:
+      - "4000:4000"
+
+    env_file:
+      - .env
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    networks:
+      - whats-next-network
+
+networks:
+  whats-next-network:
+    driver: bridge
