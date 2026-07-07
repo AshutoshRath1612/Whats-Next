@@ -2,6 +2,7 @@ services:
   backend:
     image: ghcr.io/ashutoshrath1612/whats-next-api:latest
     container_name: whats-next-api
+    pull_policy: always
 
     restart: unless-stopped
 
