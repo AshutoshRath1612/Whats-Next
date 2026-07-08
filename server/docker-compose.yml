@@ -6,8 +6,11 @@ services:
 
     restart: unless-stopped
 
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
 
     env_file:
       - .env
@@ -22,6 +25,60 @@ services:
     networks:
       - whats-next-network
 
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+
+    restart: unless-stopped
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/ubuntu/.docker/config.json:/config.json:ro
+
+    command: >
+      --interval 600
+      --cleanup
+
+    networks:
+      - whats-next-network
+
+  portainer:
+    image: portainer/portainer-ce:latest
+
+    container_name: portainer
+
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:9000:9000"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+    networks:
+      - whats-next-network
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+
+    container_name: uptime-kuma
+
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1: 3001:3001"
+
+    volumes:
+      - uptime_kuma_data:/app/data
+
+    networks:
+      - whats-next-network
+
 networks:
   whats-next-network:
     driver: bridge
+
+volumes:
+  portainer_data:
+  uptime_kuma_data:
