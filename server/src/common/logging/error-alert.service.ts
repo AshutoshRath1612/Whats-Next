@@ -16,7 +16,7 @@ export class ErrorAlertService {
 
     const minStatus = Number(this.config.get<string>("ERROR_ALERT_MIN_STATUS", "400"));
     const statusCode = input.statusCode ?? 500;
-    if (statusCode < minStatus) return;
+    if (statusCode < minStatus || statusCode == 404) return;
 
     const to = this.config.get<string>("ADMIN_ERROR_ALERT_EMAIL");
     const apiKey = this.config.get<string>("RESEND_API_KEY");
