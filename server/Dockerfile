@@ -2,7 +2,9 @@ FROM node:24-bookworm-slim AS deps
 
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+RUN apt-get update && \
+    apt-get install -y openssl && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 
@@ -14,7 +16,9 @@ FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+RUN apt-get update && \
+    apt-get install -y openssl && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
 
@@ -33,7 +37,9 @@ FROM node:24-bookworm-slim AS runner
 
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+RUN apt-get update && \
+    apt-get install -y openssl && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     PORT=4000
