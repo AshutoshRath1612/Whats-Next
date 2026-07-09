@@ -8,6 +8,12 @@ export function getOrCreateRequestId(request: ApiLogRequest) {
   return requestId;
 }
 
+export function getCorrelationId(request: ApiLogRequest) {
+  const correlationId = request.correlationId ?? readHeader(request.headers["x-correlation-id"]);
+  if (correlationId) request.correlationId = correlationId;
+  return correlationId;
+}
+
 export function extractWorkspaceId(request: ApiLogRequest) {
   return firstString([
     readParam(request.params, "workspaceId"),

@@ -1,10 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, Priority, Severity, TaskStatus, TicketStatus, TimerStatus } from "@prisma/client";
 import { createHmac, createHash, randomUUID } from "node:crypto";
+import { writeAuditLog } from "../common/audit";
+import { StructuredLoggerService } from "../common/logging/structured-logger.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateFileAssetDto, UpdateFileAssetDto, UploadFileBytesDto } from "./dto";
-import { writeAuditLog } from "../common/audit";
 
 @Injectable()
 export class FilesService {
@@ -12,7 +13,8 @@ export class FilesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    @Optional() private readonly structuredLogger?: StructuredLoggerService
   ) {}
 
   async list(userId: string, workspaceId: string, query: { q?: string; skip: number; take: number; sortBy?: string; sortDir: "asc" | "desc" }) {
@@ -75,6 +77,18 @@ export class FilesService {
       }
     });
     await writeAuditLog(this.prisma, { workspaceId: dto.workspaceId, userId, action: "create", entityType: "file", entityId: created.id, after: created });
+    this.structuredLogger?.fileUploaded({
+      userId,
+      workspaceId: dto.workspaceId,
+      data: {
+        fileId: created.id,
+        fileName: created.name,
+        mimeType: created.mimeType,
+        sizeBytes: created.size,
+        entityType: created.entityType,
+        entityId: created.entityId
+      }
+    });
     return created;
   }
 
@@ -112,6 +126,18 @@ export class FilesService {
       }
     });
     await writeAuditLog(this.prisma, { workspaceId: dto.workspaceId, userId, action: "create", entityType: "file", entityId: created.id, after: created });
+    this.structuredLogger?.fileUploaded({
+      userId,
+      workspaceId: dto.workspaceId,
+      data: {
+        fileId: created.id,
+        fileName: created.name,
+        mimeType: created.mimeType,
+        sizeBytes: created.size,
+        entityType: created.entityType,
+        entityId: created.entityId
+      }
+    });
     return created;
   }
 
@@ -266,6 +292,16 @@ export class FilesService {
       data: { deletedAt: new Date() }
     });
     await writeAuditLog(this.prisma, { workspaceId: file.workspaceId, userId, action: "delete", entityType: "file", entityId: deleted.id });
+    this.structuredLogger?.fileDeleted({
+      userId,
+      workspaceId: file.workspaceId,
+      data: {
+        fileId: deleted.id,
+        fileName: deleted.name,
+        entityType: deleted.entityType,
+        entityId: deleted.entityId
+      }
+    });
     return deleted;
   }
 

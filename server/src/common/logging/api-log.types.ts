@@ -8,7 +8,9 @@ export type RequestUser = {
 
 export type ApiLogRequest = Request & {
   requestId?: string;
+  correlationId?: string;
   requestStartedAt?: Date;
+  requestStartedHrtimeNs?: bigint;
   apiLogWritten?: boolean;
   user?: RequestUser;
   route?: {
@@ -18,6 +20,7 @@ export type ApiLogRequest = Request & {
 
 export type ApiRequestLogInput = {
   requestId: string;
+  correlationId?: string;
   method: string;
   path: string;
   route?: string;
@@ -38,9 +41,12 @@ export type ApiRequestLogInput = {
   errorName?: string;
   errorMessage?: string;
   errorStack?: string;
+  errorCategory?: string;
   startedAt: Date;
   completedAt: Date;
 };
+
+export type ApiRequestStartedLogInput = Omit<ApiRequestLogInput, "statusCode" | "success" | "durationMs" | "completedAt" | "response" | "errorName" | "errorMessage" | "errorStack" | "errorCategory">;
 
 export type ApiErrorAlertInput = ApiRequestLogInput & {
   error: unknown;

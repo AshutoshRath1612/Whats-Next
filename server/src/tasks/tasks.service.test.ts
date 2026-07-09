@@ -64,3 +64,32 @@ test("TasksService persists rich task custom fields and checklist data", async (
   assert.equal(createInput.data.customFields.acceptanceCriteria, "Done means verified");
   assert.ok(createInput.data.dueDate instanceof Date);
 });
+
+test("TasksService updates and clears task project assignment", async () => {
+  const projectLookups: Array<{ id: string; workspaceId: string }> = [];
+  const updates: any[] = [];
+  const service = new TasksService({
+    workspaceMember: { findUnique: async () => ({ id: "member-1" }) },
+    project: {
+      findFirst: async ({ where }: any) => {
+        projectLookups.push({ id: where.id, workspaceId: where.workspaceId });
+        return { id: where.id };
+      }
+    },
+    task: {
+      findFirst: async () => ({ id: "task-1", workspaceId: "workspace-1" }),
+      update: async (input: unknown) => {
+        updates.push(input);
+        return { id: "task-1", workspaceId: "workspace-1" };
+      }
+    },
+    auditLog: { create: async () => ({}) }
+  } as never);
+
+  await service.update("user-1", "task-1", { projectId: "project-1" });
+  await service.update("user-1", "task-1", { projectId: null });
+
+  assert.deepEqual(projectLookups, [{ id: "project-1", workspaceId: "workspace-1" }]);
+  assert.deepEqual(updates[0].data.project, { connect: { id: "project-1" } });
+  assert.deepEqual(updates[1].data.project, { disconnect: true });
+});

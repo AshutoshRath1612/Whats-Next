@@ -5,6 +5,7 @@ import { ExtractJwt, Strategy } from "passport-jwt";
 import { PrismaService } from "../prisma/prisma.service";
 
 export const AUTH_COOKIE_NAME = "whats_next_access_token";
+export const AUTH_REFRESH_COOKIE_NAME = "whats_next_refresh_token";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {

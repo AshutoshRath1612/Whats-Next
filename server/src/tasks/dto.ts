@@ -62,6 +62,10 @@ export class CreateTaskDto {
 }
 
 export class UpdateTaskDto {
+  @IsUUID()
+  @IsOptional()
+  projectId?: string | null;
+
   @IsString()
   @MinLength(2)
   @IsOptional()

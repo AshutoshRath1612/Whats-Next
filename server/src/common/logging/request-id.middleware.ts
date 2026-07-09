@@ -1,17 +1,20 @@
 import { Injectable, NestMiddleware } from "@nestjs/common";
 import { NextFunction, Response } from "express";
 import { ApiLogRequest } from "./api-log.types";
-import { getOrCreateRequestId } from "./request-context";
+import { getCorrelationId, getOrCreateRequestId } from "./request-context";
 import { addFlowStep, runWithRequestFlow } from "./request-flow-context";
 
 @Injectable()
 export class RequestIdMiddleware implements NestMiddleware {
   use(request: ApiLogRequest, response: Response, next: NextFunction) {
     const requestId = getOrCreateRequestId(request);
+    const correlationId = getCorrelationId(request);
     const startedAt = new Date();
     request.requestStartedAt = startedAt;
+    request.requestStartedHrtimeNs = process.hrtime.bigint();
     response.setHeader("x-request-id", requestId);
-    runWithRequestFlow({ requestId, startedAt }, () => {
+    if (correlationId) response.setHeader("x-correlation-id", correlationId);
+    runWithRequestFlow({ requestId, correlationId, startedAt }, () => {
       addFlowStep({
         step: "http.request.received",
         layer: "http",

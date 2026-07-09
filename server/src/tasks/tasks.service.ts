@@ -39,6 +39,7 @@ export class TasksService {
   async update(userId: string, id: string, dto: UpdateTaskDto) {
     const task = await this.findAccessibleTask(userId, id);
     if (dto.status) this.assertValidStatus(dto.status);
+    if (dto.projectId) await this.assertProjectInWorkspace(dto.projectId, task.workspaceId);
 
     const updated = await this.prisma.task.update({
       where: { id: task.id },
@@ -114,6 +115,7 @@ export class TasksService {
 
   private toUpdateData(dto: UpdateTaskDto): Prisma.TaskUpdateInput {
     return {
+      project: dto.projectId === null ? { disconnect: true } : dto.projectId ? { connect: { id: dto.projectId } } : undefined,
       title: dto.title,
       description: dto.description,
       priority: dto.priority,

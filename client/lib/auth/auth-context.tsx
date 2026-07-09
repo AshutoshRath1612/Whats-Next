@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
-import { AuthUser, googleLoginRequest, loginRequest, logoutRequest, meRequest, registerRequest } from "./api";
+import { AuthUser, googleLoginRequest, loginRequest, logoutRequest, refreshRequest, registerRequest, sessionRequest } from "./api";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -24,10 +24,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
-    meRequest()
-      .then((currentUser) => {
-        setUser(currentUser);
-        setStatus("authenticated");
+    sessionRequest()
+      .then((response) => {
+        if (response.authenticated) {
+          saveSession(response.accessToken, response.user);
+        } else {
+          clearSession();
+          setStatus("unauthenticated");
+        }
       })
       .catch(() => {
         clearSession();
@@ -56,15 +60,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const expiresAt = getJwtExpiryMs(token);
     if (!expiresAt) return;
 
-    const delay = expiresAt - Date.now();
+    const delay = expiresAt - Date.now() - 60_000;
     if (delay <= 0) {
-      expireSession();
+      void refreshSession();
       return;
     }
 
-    const timeout = window.setTimeout(expireSession, delay);
+    const timeout = window.setTimeout(() => void refreshSession(), delay);
     return () => window.clearTimeout(timeout);
   }, [status, token]);
+
+  async function refreshSession() {
+    try {
+      const response = await refreshRequest();
+      saveSession(response.accessToken, response.user);
+    } catch {
+      expireSession();
+    }
+  }
 
   const value = useMemo<AuthContextValue>(
     () => ({

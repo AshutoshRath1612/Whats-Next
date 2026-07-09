@@ -11,6 +11,10 @@ export type AuthResponse = {
   user: AuthUser;
 };
 
+export type AuthSessionResponse =
+  | { authenticated: false }
+  | ({ authenticated: true } & AuthResponse);
+
 export type ForgotPasswordResponse = {
   sent: boolean;
   resetUrl?: string;
@@ -55,6 +59,19 @@ export async function googleLoginRequest(idToken: string) {
     method: "POST",
     body: JSON.stringify({ idToken })
   }));
+}
+
+export async function refreshRequest() {
+  return normalizeAuthResponse(await request<AuthResponse>("/auth/refresh", {
+    method: "POST"
+  }));
+}
+
+export async function sessionRequest() {
+  const response = await request<AuthSessionResponse>("/auth/session", {
+    method: "POST"
+  });
+  return response.authenticated ? { ...response, user: normalizeAuthUser(response.user) } : response;
 }
 
 export async function meRequest(token?: string | null) {

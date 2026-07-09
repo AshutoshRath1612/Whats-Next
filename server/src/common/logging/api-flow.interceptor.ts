@@ -4,8 +4,8 @@ import { catchError, Observable, tap, throwError } from "rxjs";
 import { ApiLogRequest, ApiRequestLogInput } from "./api-log.types";
 import { ApiLoggerService } from "./api-logger.service";
 import { getErrorMessage, getErrorName } from "./log-sanitizer";
-import { extractWorkspaceId, getOrCreateRequestId, getRequestUserId, getRoutePath } from "./request-context";
-import { addFlowStep, getFlowResponseBody, getFlowSteps, setFlowResponseBody } from "./request-flow-context";
+import { extractWorkspaceId, getCorrelationId, getOrCreateRequestId, getRequestUserId, getRoutePath } from "./request-context";
+import { addFlowStep, getFlowResponseBody, getFlowSteps, setFlowResponseBody, updateRequestLogContext } from "./request-flow-context";
 
 @Injectable()
 export class ApiFlowInterceptor implements NestInterceptor {
@@ -18,11 +18,13 @@ export class ApiFlowInterceptor implements NestInterceptor {
     const request = http.getRequest<ApiLogRequest>();
     const response = http.getResponse<Response>();
     const startedAt = new Date();
-    const startedMs = Date.now();
+    const startedNs = process.hrtime.bigint();
     const controller = context.getClass().name;
     const handler = context.getHandler().name;
     const baseLog = this.buildBaseLog(request, startedAt, controller, handler);
     const controllerTarget = `${controller}.${handler}`;
+    updateRequestLogContext(baseLog);
+    this.apiLogger.logStarted(baseLog);
 
     addFlowStep({
       step: "controller.enter",
@@ -47,7 +49,7 @@ export class ApiFlowInterceptor implements NestInterceptor {
           layer: "controller",
           event: "completed",
           target: controllerTarget,
-          durationMs: Date.now() - startedMs,
+          durationMs: elapsedMs(startedNs),
           description: `${controllerTarget} returned a successful response.`,
           data: { response: result }
         });
@@ -56,7 +58,7 @@ export class ApiFlowInterceptor implements NestInterceptor {
           ...baseLog,
           statusCode: response.statusCode,
           success: response.statusCode < 400,
-          durationMs: Date.now() - startedMs,
+          durationMs: elapsedMs(startedNs),
           completedAt: new Date(),
           response: getFlowResponseBody(),
           trace: getFlowSteps()
@@ -68,7 +70,7 @@ export class ApiFlowInterceptor implements NestInterceptor {
           layer: "controller",
           event: "failed",
           target: controllerTarget,
-          durationMs: Date.now() - startedMs,
+          durationMs: elapsedMs(startedNs),
           description: `${controllerTarget} failed before returning a successful response.`,
           error: {
             name: getErrorName(error),
@@ -83,6 +85,7 @@ export class ApiFlowInterceptor implements NestInterceptor {
   private buildBaseLog(request: ApiLogRequest, startedAt: Date, controller: string, handler: string): Omit<ApiRequestLogInput, "statusCode" | "success" | "durationMs" | "completedAt"> {
     return {
       requestId: getOrCreateRequestId(request),
+      correlationId: getCorrelationId(request),
       method: request.method,
       path: request.originalUrl,
       route: getRoutePath(request),
@@ -98,6 +101,10 @@ export class ApiFlowInterceptor implements NestInterceptor {
       startedAt
     };
   }
+}
+
+function elapsedMs(startedNs: bigint) {
+  return Number((process.hrtime.bigint() - startedNs) / 1_000_000n);
 }
 
 function getHeader(value: string | string[] | undefined) {

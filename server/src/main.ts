@@ -5,10 +5,12 @@ import compression from "compression";
 import { json, urlencoded } from "express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { StructuredLoggerService } from "./common/logging/structured-logger.service";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
   const config = app.get(ConfigService);
+  app.useLogger(app.get(StructuredLoggerService));
   const requestBodyLimit = config.get<string>("REQUEST_BODY_LIMIT", "100mb");
 
   app.setGlobalPrefix("api");
@@ -16,8 +18,8 @@ async function bootstrap() {
     origin: parseCorsOrigins(config.get<string>("CORS_ORIGINS") ?? config.get<string>("CLIENT_URL", "http://localhost:3000")),
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Request-Id"],
-    exposedHeaders: ["X-Request-Id"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Request-Id", "X-Correlation-Id"],
+    exposedHeaders: ["X-Request-Id", "X-Correlation-Id"],
     maxAge: 86_400
   });
   app.use(helmet());

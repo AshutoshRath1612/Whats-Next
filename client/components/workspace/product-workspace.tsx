@@ -1633,14 +1633,27 @@ function TasksView({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState("");
-  const [taskFilter, setTaskFilter] = useState<"all" | "ongoing" | "completed">("all");
+  const [taskFilter, setTaskFilter] = useState<"all" | "ongoing" | "completed">("ongoing");
+  const [taskQuery, setTaskQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
+  const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
   const selectedTask = store.state.tasks.find((task) => task.id === selectedTaskId) ?? null;
   const hasTasks = store.state.tasks.length > 0;
   const filteredTasks = store.state.tasks.filter((task) => {
     if (taskFilter === "completed") return task.status === "Done";
     if (taskFilter === "ongoing") return task.status !== "Done";
     return true;
-  });
+  }).filter((task) => {
+    if (statusFilter !== "all" && task.status !== statusFilter) return false;
+    if (priorityFilter !== "all" && task.priority !== priorityFilter) return false;
+    if (projectFilter === "none" && task.projectId) return false;
+    if (projectFilter !== "all" && projectFilter !== "none" && task.projectId !== projectFilter) return false;
+    if (taskQuery.trim() && !taskMatchesQuery(task, store.state.projects, taskQuery)) return false;
+    return true;
+  }).sort(compareTasksForFocus);
+  const activeTaskCount = store.state.tasks.filter((task) => task.status !== "Done").length;
+  const completedTaskCount = store.state.tasks.filter((task) => task.status === "Done").length;
 
   useEffect(() => {
     if (!initialTaskId) return;
@@ -1692,10 +1705,58 @@ function TasksView({
       {!loading && !error && !hasTasks && <EmptyState label="No Tasks data available." />}
       {hasTasks && (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Button variant={taskFilter === "all" ? "primary" : "outline"} size="sm" onClick={() => setTaskFilter("all")}>All tasks</Button>
-            <Button variant={taskFilter === "ongoing" ? "primary" : "outline"} size="sm" onClick={() => setTaskFilter("ongoing")}>Ongoing</Button>
-            <Button variant={taskFilter === "completed" ? "primary" : "outline"} size="sm" onClick={() => setTaskFilter("completed")}>Completed</Button>
+          <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              <Button variant={taskFilter === "ongoing" ? "primary" : "outline"} size="sm" onClick={() => setTaskFilter("ongoing")}>Ongoing ({activeTaskCount})</Button>
+              <Button variant={taskFilter === "all" ? "primary" : "outline"} size="sm" onClick={() => setTaskFilter("all")}>All ({store.state.tasks.length})</Button>
+              <Button variant={taskFilter === "completed" ? "primary" : "outline"} size="sm" onClick={() => setTaskFilter("completed")}>Completed ({completedTaskCount})</Button>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_150px_190px_150px]">
+              <LabeledField label="Search tasks">
+                <input
+                  value={taskQuery}
+                  onChange={(event) => setTaskQuery(event.target.value)}
+                  placeholder="Title, description, tag, ticket, note..."
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                />
+              </LabeledField>
+              <LabeledField label="Status">
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "all")} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
+                  <option value="all">Any status</option>
+                  {taskStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </LabeledField>
+              <LabeledField label="Project">
+                <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
+                  <option value="all">Any project</option>
+                  <option value="none">No project</option>
+                  {store.state.projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.archived ? " (archived)" : ""}</option>)}
+                </select>
+              </LabeledField>
+              <LabeledField label="Priority">
+                <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as Priority | "all")} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm">
+                  <option value="all">Any priority</option>
+                  {priorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+                </select>
+              </LabeledField>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{filteredTasks.length} task{filteredTasks.length === 1 ? "" : "s"} shown. Active work is sorted first; completed work stays below it.</span>
+              {(taskQuery || statusFilter !== "all" || projectFilter !== "all" || priorityFilter !== "all") && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setTaskQuery("");
+                    setStatusFilter("all");
+                    setProjectFilter("all");
+                    setPriorityFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
           </div>
       {mode === "details" && (
         <div className="space-y-3">
@@ -7764,6 +7825,71 @@ function shiftRecurringDate(value: string, rule: RecurrenceRule) {
   if (rule === "Weekly") date.setDate(date.getDate() + 7);
   if (rule === "Monthly") date.setMonth(date.getMonth() + 1);
   return toDateKey(date);
+}
+
+function taskMatchesQuery(task: Task, projects: Project[], rawQuery: string) {
+  const terms = rawQuery.toLowerCase().split(/\s+/).map((term) => term.trim()).filter(Boolean);
+  if (terms.length === 0) return true;
+  const project = task.projectId ? projects.find((item) => item.id === task.projectId) : null;
+  const searchable = [
+    task.title,
+    task.description,
+    task.status,
+    task.priority,
+    task.workType,
+    task.ticketNumber,
+    task.customer,
+    task.severity,
+    task.investigation,
+    task.resolution,
+    task.closureNotes,
+    task.acceptanceCriteria,
+    project?.name,
+    ...task.tags,
+    ...task.dependencies,
+    ...task.attachments,
+    ...task.checklist.map((item) => item.label),
+    ...task.subtasks.map((item) => item.title),
+    ...task.notes.map((note) => note.body)
+  ].filter(Boolean).join(" ").toLowerCase();
+  return terms.every((term) => searchable.includes(term));
+}
+
+function compareTasksForFocus(a: Task, b: Task) {
+  const completedDiff = Number(a.status === "Done") - Number(b.status === "Done");
+  if (completedDiff !== 0) return completedDiff;
+
+  const overdueDiff = Number(isTaskOverdue(b)) - Number(isTaskOverdue(a));
+  if (overdueDiff !== 0) return overdueDiff;
+
+  const dueDiff = taskDueSortValue(a) - taskDueSortValue(b);
+  if (dueDiff !== 0) return dueDiff;
+
+  const priorityDiff = priorityWeight(b.priority) - priorityWeight(a.priority);
+  if (priorityDiff !== 0) return priorityDiff;
+
+  const updatedDiff = dateTimeSortValue(b.updatedAt) - dateTimeSortValue(a.updatedAt);
+  if (updatedDiff !== 0) return updatedDiff;
+
+  return a.title.localeCompare(b.title);
+}
+
+function taskDueSortValue(task: Task) {
+  const date = parseTaskDate(task.due);
+  return date ? date.getTime() : Number.MAX_SAFE_INTEGER;
+}
+
+function dateTimeSortValue(value?: string) {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function priorityWeight(priority: Priority) {
+  if (priority === "Urgent") return 4;
+  if (priority === "High") return 3;
+  if (priority === "Medium") return 2;
+  return 1;
 }
 
 function formatDateLabel(value: string) {

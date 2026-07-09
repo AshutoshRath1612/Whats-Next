@@ -1,7 +1,8 @@
-import { ForbiddenException, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from "@nestjs/common";
+import { ForbiddenException, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { AiService } from "../ai/ai.service";
 import { buildDailySummaryEmail, buildReminderDigestEmail, EmailMessage } from "../common/email/email-templates";
+import { StructuredLoggerService } from "../common/logging/structured-logger.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 type WorkspaceNotification = {
@@ -53,7 +54,8 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly ai: AiService
+    private readonly ai: AiService,
+    @Optional() private readonly structuredLogger?: StructuredLoggerService
   ) {}
 
   onModuleInit() {
@@ -174,6 +176,26 @@ export class NotificationsService {
         body: `A daily summary was sent to ${user.email}.`
       }
     });
+    this.structuredLogger?.emailSent({
+      userId,
+      workspaceId,
+      data: {
+        type: "daily_summary",
+        subject: email.subject,
+        recipientDomain: extractEmailDomain(user.email),
+        aiProvider: aiSummary.providerLabel,
+        aiModel: aiSummary.model
+      }
+    });
+    this.structuredLogger?.notificationSent({
+      userId,
+      workspaceId,
+      data: {
+        type: "daily_summary",
+        channel: "email",
+        subject: email.subject
+      }
+    });
 
     return { delivered: true, subject: email.subject, body: email.text, ai: aiSummary };
   }
@@ -195,6 +217,24 @@ export class NotificationsService {
         workspaceId,
         title: "Reminder digest emailed",
         body: `Deadline and timer reminders were sent to ${user.email}.`
+      }
+    });
+    this.structuredLogger?.emailSent({
+      userId,
+      workspaceId,
+      data: {
+        type: "deadline_reminder_digest",
+        subject: email.subject,
+        recipientDomain: extractEmailDomain(user.email)
+      }
+    });
+    this.structuredLogger?.notificationSent({
+      userId,
+      workspaceId,
+      data: {
+        type: "deadline_reminder_digest",
+        channel: "email",
+        subject: email.subject
       }
     });
 
@@ -294,6 +334,11 @@ function startOfToday() {
 
 function toDateKey(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+function extractEmailDomain(email: string) {
+  const domain = email.split("@")[1]?.trim().toLowerCase();
+  return domain || "unknown";
 }
 
 function buildAiDailySummaryPrompt(input: { workspaceName: string; userName: string; tasks: DailySummaryTaskRecord[]; timers: DailySummaryTimeRecord[]; now: Date }) {

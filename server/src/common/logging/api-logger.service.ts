@@ -1,25 +1,73 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { PrismaService } from "../../prisma/prisma.service";
-import { ApiRequestLogInput } from "./api-log.types";
-import { sanitizeForLog, sanitizeStack, truncate } from "./log-sanitizer";
+import { ApiRequestLogInput, ApiRequestStartedLogInput } from "./api-log.types";
+import { sanitizeForLog, sanitizeStack } from "./log-sanitizer";
 import { RequestFlowStep } from "./request-flow-context";
+import { StructuredLoggerService } from "./structured-logger.service";
 
 @Injectable()
 export class ApiLoggerService {
-  private readonly logger = new Logger(ApiLoggerService.name);
-
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    private readonly logger: StructuredLoggerService
   ) {}
 
+  logStarted(input: ApiRequestStartedLogInput) {
+    this.logger.emit("info", {
+      event: "api_started",
+      message: "Request started.",
+      requestId: input.requestId,
+      correlationId: input.correlationId,
+      method: input.method,
+      path: input.path,
+      route: input.route,
+      handler: formatHandler(input.controller, input.handler),
+      controller: input.controller,
+      statusCode: undefined,
+      responseTimeMs: 0,
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      ip: input.ip,
+      userAgent: input.userAgent
+    });
+  }
+
   async log(input: ApiRequestLogInput) {
-    const level = input.success ? "log" : "warn";
-    this.logger[level](formatConsoleLog(input));
+    const event = input.success ? "api_completed" : "api_failed";
+    this.logger.emit(input.success ? "info" : "error", {
+      event,
+      message: input.success ? "Request completed." : "Request failed.",
+      requestId: input.requestId,
+      correlationId: input.correlationId,
+      method: input.method,
+      path: input.path,
+      route: input.route,
+      handler: formatHandler(input.controller, input.handler),
+      controller: input.controller,
+      statusCode: input.statusCode,
+      responseTimeMs: input.durationMs,
+      durationMs: input.durationMs,
+      userId: input.userId,
+      workspaceId: input.workspaceId,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      success: input.success,
+      errorCategory: input.errorCategory,
+      error: input.errorMessage
+        ? {
+            name: input.errorName,
+            message: input.errorMessage,
+            stack: sanitizeStack(input.errorStack)
+          }
+        : undefined,
+      flowSummary: summarizeApplicationFlow(input.trace)
+    });
+
     await this.writeFlowLogFile(input);
 
     try {
@@ -51,7 +99,12 @@ export class ApiLoggerService {
         }
       });
     } catch (error) {
-      this.logger.warn(`Could not persist API request log ${input.requestId}: ${error instanceof Error ? error.message : "unknown error"}`);
+      this.logger.emit("warn", {
+        event: "api_log_persist_failed",
+        message: "Could not persist API request log.",
+        requestId: input.requestId,
+        error: error instanceof Error ? { name: error.name, message: error.message, stack: sanitizeStack(error.stack) } : error
+      });
     }
   }
 
@@ -61,8 +114,10 @@ export class ApiLoggerService {
     const configuredPath = this.config.get<string>("API_LOG_FILE_PATH") || "logs/api-flow.log";
     const logPath = resolveDatedLogPath(configuredPath, input.startedAt);
     const entry = {
-      summary: formatConsoleLog(input),
+      message: input.success ? "Request completed." : "Request failed.",
+      event: input.success ? "api_completed" : "api_failed",
       requestId: input.requestId,
+      correlationId: input.correlationId,
       outcome: input.success ? "completed" : "failed",
       method: input.method,
       path: input.path,
@@ -70,6 +125,7 @@ export class ApiLoggerService {
       controller: input.controller,
       handler: input.handler,
       statusCode: input.statusCode,
+      responseTimeMs: input.durationMs,
       durationMs: input.durationMs,
       userId: input.userId,
       workspaceId: input.workspaceId,
@@ -85,7 +141,8 @@ export class ApiLoggerService {
         ? {
             name: input.errorName,
             message: input.errorMessage,
-            stack: sanitizeStack(input.errorStack)
+            stack: sanitizeStack(input.errorStack),
+            category: input.errorCategory
           }
         : undefined,
       flow: sanitizeForLog(input.trace),
@@ -97,7 +154,13 @@ export class ApiLoggerService {
       await mkdir(dirname(logPath), { recursive: true });
       await appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8");
     } catch (error) {
-      this.logger.warn(`Could not write API flow log file ${logPath}: ${error instanceof Error ? error.message : "unknown error"}`);
+      this.logger.emit("warn", {
+        event: "api_log_file_write_failed",
+        message: "Could not write API flow log file.",
+        requestId: input.requestId,
+        path: logPath,
+        error: error instanceof Error ? { name: error.name, message: error.message, stack: sanitizeStack(error.stack) } : error
+      });
     }
   }
 }
@@ -113,19 +176,8 @@ export function resolveDatedLogPath(configuredPath: string, date: Date, cwd = pr
   return join(dirname(logPath), `${day}_${basename(logPath)}`);
 }
 
-function formatConsoleLog(input: ApiRequestLogInput) {
-  const status = input.statusCode ?? "unknown";
-  const outcome = input.success ? "API completed" : "API failed";
-  const handler = [input.controller, input.handler].filter(Boolean).join(".") || input.route || "unknown handler";
-  const user = input.userId ? `user=${input.userId}` : "anonymous";
-  const workspace = input.workspaceId ? `workspace=${input.workspaceId}` : "workspace=none";
-  const error = input.errorMessage ? ` | error=${input.errorName ?? "Error"}: ${input.errorMessage}` : "";
-  const request = ` | request=${compactJson({ query: input.query, params: input.params, body: input.body }, 360)}`;
-  const response = ` | response=${compactJson(input.response, 360)}`;
-  const aiProvider = formatAiProviderSummary(input.trace);
-  const flow = ` | flow=${summarizeApplicationFlow(input.trace)}`;
-
-  return `${outcome}: ${input.method} ${input.path} -> ${status} in ${input.durationMs}ms | requestId=${input.requestId} | handler=${handler} | ${user} | ${workspace}${request}${response}${aiProvider}${error}${flow}`;
+function formatHandler(controller?: string, handler?: string) {
+  return [controller, handler].filter(Boolean).join(".") || undefined;
 }
 
 function summarizeApplicationFlow(trace: unknown) {
@@ -139,43 +191,4 @@ function summarizeApplicationFlow(trace: unknown) {
     .map((step) => step.target ?? step.step)
     .filter(Boolean);
   return [...new Set(targets)].join(" -> ") || "no app flow captured";
-}
-
-function formatAiProviderSummary(trace: unknown) {
-  if (!Array.isArray(trace)) return "";
-  const steps = trace as RequestFlowStep[];
-  const completed = [...steps].reverse().find((step) => step.step === "ai.provider.completed");
-  const failed = [...steps].reverse().find((step) => step.step === "ai.provider.failed");
-  const chain = steps.find((step) => step.step === "ai.provider.chain");
-  const completedData = readRecord(completed?.data);
-  if (completedData) {
-    return ` | aiProvider=${formatLogValue(completedData.providerLabel ?? completedData.provider ?? completed?.target)} model=${formatLogValue(completedData.model)} endpoint=${formatLogValue(completedData.endpoint)}`;
-  }
-
-  const failedData = readRecord(failed?.data);
-  if (failedData) {
-    return ` | aiProviderFailed=${formatLogValue(failedData.providerLabel ?? failedData.provider ?? failed?.target)} model=${formatLogValue(failedData.model)} endpoint=${formatLogValue(failedData.endpoint)}`;
-  }
-
-  const chainData = readRecord(chain?.data);
-  if (chainData) {
-    return ` | aiProviderMode=${formatLogValue(chainData.providerMode)}`;
-  }
-  return "";
-}
-
-function readRecord(value: unknown) {
-  return value && typeof value === "object" ? value as Record<string, unknown> : null;
-}
-
-function formatLogValue(value: unknown) {
-  if (typeof value === "string" && value.trim()) return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return "unknown";
-}
-
-function compactJson(value: unknown, maxLength: number) {
-  const sanitized = sanitizeForLog(value);
-  if (sanitized === undefined || sanitized === null) return "null";
-  return truncate(JSON.stringify(sanitized), maxLength);
 }
