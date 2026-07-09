@@ -2,17 +2,20 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Injec
 import { Response } from "express";
 import { ApiLogRequest } from "../logging/api-log.types";
 import { ApiLoggerService } from "../logging/api-logger.service";
+import { classifyError } from "../logging/error-category";
 import { ErrorAlertService } from "../logging/error-alert.service";
 import { getErrorMessage, getErrorName, sanitizeStack } from "../logging/log-sanitizer";
-import { extractWorkspaceId, getOrCreateRequestId, getRequestUserId, getRoutePath } from "../logging/request-context";
-import { addFlowStep, getFlowResponseBody, getFlowSteps, setFlowResponseBody } from "../logging/request-flow-context";
+import { extractWorkspaceId, getCorrelationId, getOrCreateRequestId, getRequestUserId, getRoutePath } from "../logging/request-context";
+import { addFlowStep, getFlowResponseBody, getFlowSteps, getRequestLogContext, setFlowResponseBody } from "../logging/request-flow-context";
+import { StructuredLoggerService } from "../logging/structured-logger.service";
 
 @Catch()
 @Injectable()
 export class AllExceptionsFilter implements ExceptionFilter {
   constructor(
     private readonly errorAlert: ErrorAlertService,
-    private readonly apiLogger: ApiLoggerService
+    private readonly apiLogger: ApiLoggerService,
+    private readonly structuredLogger: StructuredLoggerService
   ) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
@@ -22,8 +25,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const payload = exception instanceof HttpException ? exception.getResponse() : "Unexpected server error";
     const requestId = getOrCreateRequestId(request);
+    const correlationId = getCorrelationId(request);
     const timestamp = new Date();
     const startedAt = request.requestStartedAt ?? timestamp;
+    const durationMs = request.requestStartedHrtimeNs ? Number((process.hrtime.bigint() - request.requestStartedHrtimeNs) / 1_000_000n) : timestamp.getTime() - startedAt.getTime();
+    const routeContext = getRequestLogContext();
+    const errorCategory = classifyError(exception);
     const responseBody = {
       statusCode: status,
       error: typeof payload === "string" ? payload : (payload as Record<string, unknown>).error,
@@ -39,7 +46,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       event: "failed",
       target: "AllExceptionsFilter.catch",
       at: timestamp,
-      durationMs: timestamp.getTime() - startedAt.getTime(),
+      durationMs,
       description: "Global exception filter converted the thrown error into a safe HTTP response.",
       data: { response: responseBody },
       error: {
@@ -50,13 +57,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const logInput = {
       requestId,
+      correlationId,
       method: request.method,
       path: request.originalUrl,
       route: getRoutePath(request),
+      controller: routeContext.controller,
+      handler: routeContext.handler,
       trace: getFlowSteps(),
       statusCode: status,
       success: false,
-      durationMs: timestamp.getTime() - startedAt.getTime(),
+      durationMs,
       userId: getRequestUserId(request),
       workspaceId: extractWorkspaceId(request),
       ip: request.ip,
@@ -68,6 +78,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       errorName: getErrorName(exception),
       errorMessage: getErrorMessage(exception),
       errorStack: sanitizeStack(exception instanceof Error ? exception.stack : undefined),
+      errorCategory,
       startedAt,
       completedAt: timestamp
     };
@@ -75,6 +86,33 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (!request.apiLogWritten) {
       request.apiLogWritten = true;
       void this.apiLogger.log(logInput);
+    }
+
+    if (errorCategory === "Validation") {
+      this.structuredLogger.validationFailure({
+        userId: logInput.userId,
+        workspaceId: logInput.workspaceId,
+        data: {
+          method: logInput.method,
+          path: logInput.path,
+          statusCode: logInput.statusCode,
+          exceptionType: logInput.errorName,
+          message: logInput.errorMessage
+        }
+      });
+    } else if (errorCategory === "Authentication" || errorCategory === "Authorization") {
+      this.structuredLogger.authorizationFailure({
+        userId: logInput.userId,
+        workspaceId: logInput.workspaceId,
+        data: {
+          method: logInput.method,
+          path: logInput.path,
+          statusCode: logInput.statusCode,
+          category: errorCategory,
+          exceptionType: logInput.errorName,
+          message: logInput.errorMessage
+        }
+      });
     }
 
     void this.errorAlert.notify({

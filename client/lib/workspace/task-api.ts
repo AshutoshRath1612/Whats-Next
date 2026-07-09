@@ -258,6 +258,7 @@ export function updateTaskRequest(token: string | null | undefined, task: Task) 
   return taskRequest<ApiTask>(`/tasks/${task.id}`, token, {
     method: "PATCH",
     body: JSON.stringify({
+      projectId: task.projectId ?? null,
       title: task.title,
       description: task.description,
       priority: priorityToApi[task.priority],

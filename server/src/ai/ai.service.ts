@@ -1,6 +1,7 @@
-import { BadRequestException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { addFlowStep } from "../common/logging/request-flow-context";
+import { StructuredLoggerService } from "../common/logging/structured-logger.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 type AiProviderName = "openai" | "groq" | "puter";
@@ -154,16 +155,39 @@ const groundedSystemPrompt = [
 export class AiService {
   private puterUsageCache?: PuterUsageCache;
 
-  constructor(private readonly prisma: PrismaService, private readonly config: ConfigService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    @Optional() private readonly logger?: StructuredLoggerService
+  ) {}
 
   async suggest(userId: string, prompt: string) {
     return this.generateText(userId, prompt);
   }
 
   async generateText(userId: string, prompt: string, systemPrompt = defaultSystemPrompt) {
+    this.logger?.aiRequest({
+      userId,
+      data: {
+        source: "assistant",
+        promptCharacters: prompt.length,
+        systemPromptCharacters: systemPrompt.length,
+        providerMode: this.getRequestedProviderMode()
+      }
+    });
     await this.prisma.aiMessage.create({ data: { userId, role: "user", content: prompt } });
     const result = await this.generateProviderResponse(prompt, systemPrompt);
     await this.prisma.aiMessage.create({ data: { userId, role: "assistant", content: result.content } });
+    this.logger?.aiResponse({
+      userId,
+      data: {
+        source: "assistant",
+        provider: result.provider,
+        providerLabel: result.providerLabel,
+        model: result.model,
+        responseCharacters: result.content.length
+      }
+    });
     return {
       content: result.content,
       provider: result.provider,
@@ -179,6 +203,15 @@ export class AiService {
     await this.assertWorkspaceAccess(userId, workspaceId);
 
     await this.prisma.aiMessage.create({ data: { userId, role: "user", content: normalizedQuestion } });
+    this.logger?.aiRequest({
+      userId,
+      workspaceId,
+      data: {
+        source: "workspace_knowledge",
+        questionCharacters: normalizedQuestion.length,
+        providerMode: this.getRequestedProviderMode()
+      }
+    });
     const query = understandQuestion(normalizedQuestion);
     const sources = await this.retrieveGroundingSources(userId, workspaceId, normalizedQuestion, query);
     addFlowStep({
@@ -198,6 +231,17 @@ export class AiService {
     if (sources.length === 0) {
       const content = "I do not have sufficient relevant workspace information to answer that confidently. Try adding any concrete clue you remember, such as a ticket number, error text, customer name, SQL purpose, note topic, file name, date range, or what happened, then ask again.";
       await this.prisma.aiMessage.create({ data: { userId, role: "assistant", content } });
+      this.logger?.aiResponse({
+        userId,
+        workspaceId,
+        level: "warn",
+        data: {
+          source: "workspace_knowledge",
+          sufficientContext: false,
+          sourceCount: 0,
+          responseCharacters: content.length
+        }
+      });
       return {
         content,
         sufficientContext: false,
@@ -208,6 +252,17 @@ export class AiService {
     const templatedAnswer = buildTemplatedAnswer(query, sources);
     if (templatedAnswer) {
       await this.prisma.aiMessage.create({ data: { userId, role: "assistant", content: templatedAnswer } });
+      this.logger?.aiResponse({
+        userId,
+        workspaceId,
+        data: {
+          source: "workspace_knowledge",
+          answerMode: "template",
+          sufficientContext: true,
+          sourceCount: sources.length,
+          responseCharacters: templatedAnswer.length
+        }
+      });
       return {
         content: templatedAnswer,
         sufficientContext: true,
@@ -218,6 +273,20 @@ export class AiService {
     const prompt = buildGroundedPrompt(normalizedQuestion, sources, query);
     const result = await this.generateProviderResponse(prompt, groundedSystemPrompt);
     await this.prisma.aiMessage.create({ data: { userId, role: "assistant", content: result.content } });
+    this.logger?.aiResponse({
+      userId,
+      workspaceId,
+      data: {
+        source: "workspace_knowledge",
+        answerMode: "provider",
+        sufficientContext: true,
+        sourceCount: sources.length,
+        provider: result.provider,
+        providerLabel: result.providerLabel,
+        model: result.model,
+        responseCharacters: result.content.length
+      }
+    });
 
     return {
       content: result.content,

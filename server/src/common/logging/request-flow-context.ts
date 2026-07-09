@@ -16,15 +16,49 @@ export type RequestFlowStep = {
 
 type RequestFlowStore = {
   requestId: string;
+  correlationId?: string;
   startedAt: Date;
   steps: RequestFlowStep[];
   responseBody?: unknown;
+  method?: string;
+  path?: string;
+  route?: string;
+  controller?: string;
+  handler?: string;
+  userId?: string;
+  workspaceId?: string;
+  ip?: string;
+  userAgent?: string;
 };
 
 const storage = new AsyncLocalStorage<RequestFlowStore>();
 
-export function runWithRequestFlow<T>(input: { requestId: string; startedAt: Date }, callback: () => T) {
-  return storage.run({ requestId: input.requestId, startedAt: input.startedAt, steps: [] }, callback);
+export function runWithRequestFlow<T>(input: { requestId: string; correlationId?: string; startedAt: Date }, callback: () => T) {
+  return storage.run({ requestId: input.requestId, correlationId: input.correlationId, startedAt: input.startedAt, steps: [] }, callback);
+}
+
+export function getRequestLogContext() {
+  const store = storage.getStore();
+  if (!store) return {};
+  return {
+    requestId: store.requestId,
+    correlationId: store.correlationId,
+    method: store.method,
+    path: store.path,
+    route: store.route,
+    controller: store.controller,
+    handler: store.handler,
+    userId: store.userId,
+    workspaceId: store.workspaceId,
+    ip: store.ip,
+    userAgent: store.userAgent
+  };
+}
+
+export function updateRequestLogContext(input: Partial<Omit<RequestFlowStore, "steps" | "startedAt">>) {
+  const store = storage.getStore();
+  if (!store) return;
+  Object.assign(store, input);
 }
 
 export function addFlowStep(input: Omit<RequestFlowStep, "sequence" | "at"> & { at?: Date | string }) {

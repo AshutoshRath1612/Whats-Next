@@ -11,7 +11,8 @@ const loginPage = readFileSync(join(root, "app/login/page.tsx"), "utf8");
 const taskApi = readFileSync(join(root, "lib/workspace/task-api.ts"), "utf8");
 
 test("auth flow validates cookie-backed sessions, redirects login, and avoids client-side auth storage", () => {
-  assert.match(authContext, /meRequest\(\)/);
+  assert.match(authContext, /sessionRequest\(\)/);
+  assert.match(authContext, /refreshRequest\(\)/);
   assert.match(loginPage, /auth\.status === "authenticated"/);
   assert.match(loginPage, /router\.replace\("\/"\)/);
   assert.doesNotMatch(authContext, new RegExp("local" + "Storage"));
@@ -24,7 +25,17 @@ test("task creation and detail updates persist complete task metadata", () => {
   assert.match(taskApi, /acceptanceCriteria/);
   assert.match(taskApi, /subtasks/);
   assert.match(taskApi, /dependencies/);
+  assert.match(taskApi, /projectId: task\.projectId \?\? null/);
   assert.match(taskApi, /notes: task\.notes/);
+});
+
+test("task view supports scalable filtering and keeps completed work below active tasks", () => {
+  assert.match(productWorkspace, /setStatusFilter/);
+  assert.match(productWorkspace, /setProjectFilter/);
+  assert.match(productWorkspace, /setPriorityFilter/);
+  assert.match(productWorkspace, /taskMatchesQuery/);
+  assert.match(productWorkspace, /compareTasksForFocus/);
+  assert.match(productWorkspace, /completed work stays below it/);
 });
 
 test("kanban drag and drop persists task status changes", () => {
