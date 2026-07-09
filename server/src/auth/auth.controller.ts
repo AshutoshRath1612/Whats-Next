@@ -73,14 +73,14 @@ export class AuthController {
   private setAuthCookies(response: Response, accessToken: string, refreshToken: string) {
     response.cookie(AUTH_COOKIE_NAME, accessToken, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: this.config.get<string>("NODE_ENV") === "production" ? "none" : "lax",
       secure: this.config.get<string>("NODE_ENV") === "production",
       path: "/",
       maxAge: this.cookieMaxAgeMs()
     });
     response.cookie(AUTH_REFRESH_COOKIE_NAME, refreshToken, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: this.config.get<string>("NODE_ENV") === "production" ? "none" : "lax",
       secure: this.config.get<string>("NODE_ENV") === "production",
       path: "/api/auth",
       maxAge: this.refreshCookieMaxAgeMs()
@@ -100,7 +100,7 @@ export class AuthController {
   private clearAuthCookie(response: Response, name: string) {
     response.clearCookie(name, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: this.config.get<string>("NODE_ENV") === "production" ? "none" : "lax",
       secure: this.config.get<string>("NODE_ENV") === "production",
       path: name === AUTH_REFRESH_COOKIE_NAME ? "/api/auth" : "/"
     });
