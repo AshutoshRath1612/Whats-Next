@@ -1,4 +1,4 @@
-FROM node:22-alpine AS deps
+FROM node:24-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN npm ci
 
 # -------------------------------------------------------
 
-FROM node:22-alpine AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -29,7 +29,7 @@ RUN npm run build
 
 # -------------------------------------------------------
 
-FROM node:22-alpine AS runner
+FROM node:24-bookworm-slim AS runner
 
 WORKDIR /app
 
