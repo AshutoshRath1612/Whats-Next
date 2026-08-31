@@ -8,7 +8,7 @@ export type ListQuery = {
 
 export function parseListQuery(query: ListQuery) {
   const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize ?? "50", 10) || 50));
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize ?? "50", 10) || 100));
   return {
     q: query.q,
     skip: (page - 1) * pageSize,
